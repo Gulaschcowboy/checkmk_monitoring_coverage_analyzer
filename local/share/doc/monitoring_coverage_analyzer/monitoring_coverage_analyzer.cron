@@ -1,0 +1,5 @@
+# monitoring_coverage_analyzer - managed by monitoring_coverage_analyzer-setup
+# refresh: every 5 min, re-sends the last result as piggyback data (keeps the service from going stale)
+# fullrun: daily 05:00, re-runs the analysis if piggyback_interval_hours has elapsed
+*/5 * * * * test -x $OMD_ROOT/local/bin/monitoring_coverage_analyzer_cron && monitoring_coverage_analyzer_cron refresh >/dev/null 2>&1
+0 5 * * * test -x $OMD_ROOT/local/bin/monitoring_coverage_analyzer_cron && monitoring_coverage_analyzer_cron fullrun >/dev/null 2>&1

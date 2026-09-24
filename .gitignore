@@ -1,0 +1,18 @@
+# Byte-compiled / editor / OS clutter
+__pycache__/
+*.py[cod]
+*~
+*.swp
+*.bak
+*.tmp
+*.log
+.DS_Store
+.idea/
+.vscode/
+.env
+
+# Built packages and local tool context (not part of the source tree)
+*.mkp
+/releases/
+/.hermes.md
+/.hermes/

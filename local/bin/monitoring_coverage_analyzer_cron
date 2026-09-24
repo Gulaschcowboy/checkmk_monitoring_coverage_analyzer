@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Cron-Trigger-Skript fuer monitoring_coverage_analyzer (Ausbaustufe
+2.0.0, Piggyback-Erweiterung).
+
+Wird von cron/system (siehe templates/monitoring_coverage_analyzer.cron)
+mit genau einem Argument aufgerufen:
+
+    monitoring_coverage_analyzer_cron refresh   # alle 5 Minuten
+    monitoring_coverage_analyzer_cron fullrun   # taeglich 05:00
+
+"refresh" loest NUR einen Piggyback-Refresh-Tick aus (letzter gecachter
+Inhalt erneut mit neuem message_timestamp geschrieben, KEINE
+Livestatus-Query). "fullrun" prueft selbst, ob piggyback_interval_hours
+seit dem letzten echten Full-Run abgelaufen ist, und fuehrt in diesem
+Fall einen kompletten Full-Run (Livestatus-Query + Regelauswertung +
+Piggyback-Full-Write) durch; andernfalls tut es nichts (No-Op, kein
+Fehler).
+
+PRAGMATISCHE ENTSCHEIDUNG (siehe Modul-Docstring der GUI-Seite,
+Ausbaustufe 2.0.0): dieses Skript ruft die Analyse-Funktionen DIREKT im
+Site-Python-Kontext auf (via cmk.gui.utils.script_helpers.
+application_and_request_context() - demselben Mechanismus, den
+Checkmk-eigene CLI-Skripte wie cmk-update-config verwenden), statt einen
+authentifizierten HTTP-Request gegen den ?_cron_fullrun=1/?_cron_refresh=1
+GET-Endpunkt der GUI-Seite abzusetzen. Das ist fuer einen reinen
+Cron-Trigger robuster/einfacher (kein Netzwerk-Roundtrip durch Apache,
+kein automation-user-secret-Handling), und wurde im Plan als
+ausdruecklich akzeptable Alternative vorgesehen ("falls ein einfacherer,
+sauberer Weg existiert ... das bevorzugen"). Der HTTP-GET-Endpunkt in der
+GUI-Seite selbst bleibt trotzdem bestehen (nuetzlich fuer manuelle Tests
+per curl mit GUI-Session-Cookie).
+
+Landet als ausfuehrbare Datei (0700) unter local/bin/ auf der Site
+(PackagePart.BIN - siehe cmk.mkp_tool.PackagePart, live auf der Test-Site
+verifiziert: PackagePart.BIN -> 'bin', Zielpfad local/bin/).
+"""
+from __future__ import annotations
+
+import sys
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2 or argv[1] not in ("refresh", "fullrun"):
+        print(
+            "Usage: monitoring_coverage_analyzer_cron {refresh|fullrun}",
+            file=sys.stderr,
+        )
+        return 2
+
+    mode = argv[1]
+
+    # Vor application_and_request_context() muss main_modules.register()
+    # aufgerufen werden - live auf der Test-Site/Checkmk 2.5.0p12 Ultimate
+    # verifiziert: ohne diesen Schritt schlaegt session_wsgi_app() mit
+    # "KeyError: Edition.ULTIMATE" im internen features_registry fehl,
+    # weil die editionsspezifische Registrierung (cmk.gui.
+    # community_registration.register() etc.) noch nicht gelaufen ist.
+    # cmk-update-config (cmk/update_config/main.py) macht exakt denselben
+    # Aufruf vor demselben application_and_request_context()-Helper - das
+    # ist also der offizielle, von Checkmk selbst benutzte Weg, kein
+    # Workaround.
+    from cmk.ccc.version import edition
+    from cmk.gui import main_modules
+    from cmk.utils import paths as cmk_paths
+
+    main_modules.register(edition(cmk_paths.omd_root))
+
+    from cmk.gui.utils.script_helpers import application_and_request_context
+
+    with application_and_request_context():
+        # WICHTIGER BEFUND (live verifiziert): main_modules.register()
+        # laedt plugins/pages/*.py per exec(compile(...), globalvars) in
+        # das globals()-Dict von cmk.gui.utils.plugins (siehe
+        # cmk.gui.utils.load_web_plugins()) - es entsteht dabei KEIN
+        # regulaer importierbares Modul unter sys.modules (import_module()
+        # dieses Pfads schlaegt fehl, sys.modules enthaelt keinen
+        # "monitoring_coverage_analyzer"-Eintrag). Das Modul wird daher
+        # hier stattdessen direkt ueber seinen Dateipfad geladen
+        # (importlib.util.spec_from_file_location) - das ist unabhaengig
+        # vom internen Lademechanismus der GUI und funktioniert, weil das
+        # Plugin selbst nur absolute cmk.gui.*-Importe verwendet.
+        import importlib.util
+        from pathlib import Path as _Path
+
+        from cmk.utils import paths as _paths
+
+        plugin_path = (
+            _Path(_paths.local_web_dir)
+            / "plugins" / "pages" / "monitoring_coverage_analyzer.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "monitoring_coverage_analyzer_page_module", plugin_path
+        )
+        if spec is None or spec.loader is None:  # pragma: no cover - defensiv
+            raise RuntimeError(
+                f"monitoring_coverage_analyzer GUI-Plugin-Modul unter "
+                f"{plugin_path} konnte nicht geladen werden."
+            )
+        page_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(page_module)
+
+        if mode == "refresh":
+            written, error = page_module._run_piggyback_refresh()
+            print(f"refresh: written={written} error={error}")
+            return 0 if error is None else 1
+
+        # mode == "fullrun"
+        due, reason = page_module._is_full_run_due(force=False)
+        if not due:
+            print(f"fullrun: skipped, not due ({reason})")
+            return 0
+        results = page_module._query_and_analyze_hosts()
+        if page_module._generate_piggyback_data_enabled():
+            written, error, _now = page_module._run_piggyback_full(results)
+        else:
+            import time as _time
+            page_module._save_cached_results(
+                results, last_full_run_timestamp=_time.time()
+            )
+            written, error = 0, None
+        print(
+            f"fullrun: hosts={len(results)} piggyback_written={written} "
+            f"error={error}"
+        )
+        return 0 if error is None else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -1,0 +1,217 @@
+{
+  "aliases": {
+    "mariadb": "mysql", "mariadbd": "mysql", "mysqld": "mysql", "mysql": "mysql",
+    "postgresql": "postgres", "postgres": "postgres", "postmaster": "postgres",
+    "httpd": "apache", "apache2": "apache", "apache": "apache",
+    "nginx": "nginx",
+    "redis": "redis",
+    "mongod": "mongodb", "mongodb": "mongodb",
+    "dockerd": "docker", "containerd": "docker", "docker": "docker",
+    "rabbitmq": "rabbitmq",
+    "elasticsearch": "elasticsearch",
+    "haproxy": "haproxy",
+    "postfix": "postfix",
+    "nfsd": "nfsexports",
+    "catalina": "jolokia", "tomcat": "jolokia", "jolokia": "jolokia",
+    "ora": "oracle", "oracle": "oracle", "pmon": "oracle",
+    "sqlservr": "mssql", "mssql": "mssql",
+    "w3wp": "iis", "inetinfo": "iis", "iis": "iis",
+    "msexchange": "msexch", "edgetransport": "msexch", "exchange": "msexch",
+    "pdns": "powerdns", "powerdns": "powerdns",
+    "cups": "cups", "cups-browsed": "cups", "cups-bsd": "cups",
+    "cups-client": "cups", "cups-pk-helper": "cups", "cupsd": "cups",
+    "openvpn": "openvpn", "openvpn-dco-dkms": "openvpn",
+    "inotify-tools": "inotify", "inotify": "inotify",
+    "oxidized": "oxidized",
+    "pihole": "pihole", "pihole-ftl": "pihole",
+    "apt": "apt",
+    "mk_inventory": "inventory", "inventory": "inventory",
+    "zypper": "zypper",
+    "openwb": "openwb",
+    "podman": "podman",
+    "proxmox": "proxmox",
+    "unifi": "unifi",
+    "checkmk": "checkmk", "cmk": "checkmk", "checkmk_agent": "checkmk",
+    "monitoring_coverage": "monitoring_coverage_self",
+    "checkmk_monitoring_coverage": "monitoring_coverage_self",
+    "zfsutils": "zfs", "zfs": "zfs", "zfsget": "zfs", "zfs_arc": "zfs",
+    "zpool": "zfs", "zpool_status": "zfs",
+    "lvm2": "lvm", "lvm": "lvm",
+    "mdadm": "md_raid", "md-raid": "md_raid", "md_raid": "md_raid",
+    "nut": "nut", "nut-client": "nut", "nut-server": "nut",
+    "homeassistant": "homeassistant", "homeassistant_source": "homeassistant",
+    "services": "services", "services_summary": "services",
+    "windows_tasks": "windows_tasks",
+    "wmi_cpuload": "wmi", "wmi_webservices": "wmi",
+    "w32time_status": "w32time", "w32time_peers": "w32time", "w32time_peers_summary": "w32time",
+    "proxmox_node_swap": "proxmox_node",
+    "proxmox_ve_ha_manager_status": "proxmox_node",
+    "proxmox_ve_node_cpu_allocation": "proxmox_node",
+    "proxmox_ve_node_directory_storages": "proxmox_node",
+    "proxmox_ve_node_info": "proxmox_node",
+    "proxmox_ve_node_lvm_storages": "proxmox_node",
+    "proxmox_ve_node_mem_allocation": "proxmox_node"
+  },
+  "titles": {
+    "mysql": "MySQL / MariaDB", "postgres": "PostgreSQL",
+    "apache": "Apache HTTP Server", "nginx": "NGINX", "redis": "Redis",
+    "mongodb": "MongoDB", "docker": "Docker", "rabbitmq": "RabbitMQ",
+    "elasticsearch": "Elasticsearch", "haproxy": "HAProxy", "postfix": "Postfix",
+    "nfsexports": "NFS Server", "jolokia": "Java / Tomcat (Jolokia)",
+    "oracle": "Oracle Database", "mssql": "Microsoft SQL Server",
+    "iis": "Microsoft IIS", "msexch": "Microsoft Exchange",
+    "powerdns": "PowerDNS",
+    "cups": "Cups", "openvpn": "Openvpn", "inotify": "Inotify",
+    "oxidized": "Oxidized", "pihole": "Pihole", "apt": "Apt",
+    "inventory": "Checkmk HW/SW Inventory",
+    "zypper": "Zypper (SUSE/openSUSE Paketmanager)",
+    "openwb": "OpenWB Wallbox",
+    "podman": "Podman",
+    "proxmox": "Proxmox VE (Node)",
+    "unifi": "Ubiquiti UniFi Controller",
+    "checkmk": "Checkmk Agent (Self-Monitoring)",
+    "zfs": "ZFS",
+    "lvm": "LVM (Logical Volume Manager)",
+    "md_raid": "Linux Software RAID (mdadm)",
+    "nut": "Network UPS Tools (NUT)",
+    "homeassistant": "Home Assistant",
+    "services": "Windows Services",
+    "windows_tasks": "Windows Task Scheduler",
+    "wmi": "Windows WMI Checks",
+    "w32time": "Windows Time Service (W32Time)",
+    "proxmox_node": "Proxmox VE (Node-Special-Agent-Checks)"
+  },
+  "hints": {
+    "mysql": "Deploy the 'mk_mysql' agent plug-in, then run service discovery.",
+    "postgres": "Deploy the 'mk_postgres' agent plug-in, then run discovery.",
+    "apache": "Enable mod_status and deploy the 'apache_status.py' agent plug-in, then run discovery.",
+    "nginx": "Enable stub_status and deploy the 'nginx_status.py' agent plug-in, then run discovery.",
+    "redis": "Deploy the 'mk_redis' agent plug-in, then run discovery.",
+    "mongodb": "Deploy the 'mk_mongodb' agent plug-in, then run discovery.",
+    "docker": "Deploy the 'mk_docker' agent plug-in, then run discovery.",
+    "rabbitmq": "Configure the 'RabbitMQ' special agent, then run discovery.",
+    "elasticsearch": "Configure the 'Elasticsearch' special agent.",
+    "haproxy": "Built into the Linux agent (needs socat and a readable stats socket) - run discovery.",
+    "postfix": "Built into the Linux agent (postfix_mailq) - run discovery.",
+    "nfsexports": "Deploy the 'nfsexports' agent plug-in, then run discovery.",
+    "jolokia": "Integrate Jolokia and deploy the 'mk_jolokia' agent plug-in.",
+    "oracle": "Deploy the 'mk_oracle' agent plug-in, then run discovery.",
+    "mssql": "Deploy the 'mk-sql' (mk-sql.exe on Windows) agent plug-in, then run discovery.",
+    "iis": "Deploy the 'iis_app_pool_state.ps1' agent plug-in, then run discovery.",
+    "msexch": "Deploy the Exchange counter plug-ins, then run discovery.",
+    "powerdns": "Deploy the 'powerdns' agent plug-in, then run discovery.",
+    "cups": "Deploy the 'mk_cups_queues' agent plug-in, then run discovery.",
+    "openvpn": "Deploy the 'openvpn_clients' agent plug-in, then run discovery.",
+    "inotify": "Deploy the 'mk_inotify.py' agent plug-in, then run discovery.",
+    "oxidized": "Deploy the 'oxidized' special agent / plug-in, then run discovery.",
+    "pihole": "Configure the 'Pi-hole' special agent, then run discovery.",
+    "apt": "Deploy the 'mk_apt' agent plug-in, then run discovery.",
+    "inventory": "Enable the 'Checkmk HW/SW Inventory' service (Setup > Hosts > <host> > Inventory & Configuration), then run service discovery.",
+    "zypper": "Deploy the 'zypper' agent plug-in (mk_zypper), then run discovery.",
+    "openwb": "Configure the 'OpenWB' special agent, then run discovery.",
+    "podman": "Configure the 'Podman' special agent, then run discovery.",
+    "proxmox": "Configure the 'Proxmox VE' special agent for this node, then run discovery.",
+    "unifi": "Configure the 'UniFi' special agent, then run discovery.",
+    "checkmk": "Ensure the Checkmk agent self-monitoring services (checkmk_agent) are discovered.",
+    "zfs": "Built into the Linux agent (zfsget, needs the zfs tools) - run discovery.",
+    "lvm": "Deploy the 'lvm' agent plug-in (lvm_vgs/lvm_lvs), then run discovery.",
+    "md_raid": "Built into the Linux agent (md) - run discovery.",
+    "nut": "Deploy the 'nut' / UPS agent plug-in, then run discovery.",
+    "homeassistant": "Configure the 'Home Assistant' special agent, then run discovery.",
+    "services": "Enable Windows service discovery (agent already reports 'services' section).",
+    "windows_tasks": "Deploy the 'windows_tasks.ps1' agent plug-in (e.g. via the Agent Bakery), then run discovery.",
+    "wmi": "Enable WMI-based checks (wmi_cpuload/wmi_webservices), then run discovery.",
+    "w32time": "Enable the 'w32time' checks (peers/status), then run discovery.",
+    "proxmox_node": "Configure the 'Proxmox VE' special agent for this node (Node-Checks), then run discovery."
+  },
+  "stop_tokens": [
+    "cpu", "mem", "memory", "df", "tcp", "udp", "uptime", "kernel", "mounts",
+    "mount", "systemd", "diskstat", "lnx", "ps", "mkeventd", "check", "cmk",
+    "livestatus", "omd", "chrony", "ntp", "cron", "ssh", "sshd", "users",
+    "threads", "vmstat", "swap", "fileinfo", "logwatch", "md", "multipath",
+    "tcpconn", "netif", "if", "interfaces", "hr", "snmp", "intel", "watchdog",
+    "iptables", "mtr", "site", "monitoring_coverage_self"
+  ],
+  "_comment_detect": "Evidence from agent output. Sections whose name maps to a token (via aliases) count automatically if they contain data. direct: extra conditions for 'data arrives' (discovery missing). runtime: service/process is running (agent plug-in missing). not_on_os: cmk/os_family values where the plug-in does not run. Conditions: section:<sec>[/<sub>]:data | section:<sec>[/<sub>]:contains:<regex> | systemd:<regex> | process:<regex> | winservice:<regex> (re.search, anchor as needed).",
+  "detect": {
+    "zfs": {
+      "direct": ["section:zpool:data", "section:zpool_status:data"]
+    },
+    "lvm": {
+      "runtime": ["section:diskstat/dmsetup_info:contains:^\\S+\\s+\\d+:\\d+\\s+\\S+\\s+\\S+"]
+    },
+    "md_raid": {
+      "direct": ["section:md:contains:^md\\d+\\s*:"]
+    },
+    "mysql": {
+      "runtime": ["systemd:^(mariadb|mysql|mysqld)\\.service$", "process:^(mysqld|mariadbd)$"]
+    },
+    "postgres": {
+      "runtime": ["systemd:^postgresql(@\\S+)?\\.service$", "process:^(postgres|postmaster)$"]
+    },
+    "apache": {
+      "runtime": ["systemd:^(apache2|httpd)\\.service$"]
+    },
+    "nginx": {
+      "runtime": ["systemd:^nginx\\.service$"]
+    },
+    "redis": {
+      "runtime": ["systemd:^redis(-server)?(@\\S+)?\\.service$"]
+    },
+    "mongodb": {
+      "runtime": ["systemd:^mongod\\.service$"]
+    },
+    "docker": {
+      "runtime": ["systemd:^docker\\.service$"]
+    },
+    "rabbitmq": {
+      "runtime": ["systemd:^rabbitmq-server\\.service$"]
+    },
+    "elasticsearch": {
+      "runtime": ["systemd:^elasticsearch\\.service$"]
+    },
+    "haproxy": {
+      "runtime": ["systemd:^haproxy\\.service$"]
+    },
+    "postfix": {
+      "runtime": ["systemd:^postfix(@\\S*)?\\.service$"]
+    },
+    "oracle": {
+      "runtime": ["process:^ora_pmon_"]
+    },
+    "powerdns": {
+      "runtime": ["systemd:^pdns(-recursor)?\\.service$"]
+    },
+    "cups": {
+      "runtime": ["systemd:^cups\\.service$"]
+    },
+    "openvpn": {
+      "runtime": ["systemd:^openvpn(-server|-client)?@\\S+\\.service$"],
+      "not_on_os": ["windows"]
+    },
+    "nut": {
+      "runtime": ["systemd:^nut-(server|monitor)\\.service$"]
+    },
+    "unifi": {
+      "runtime": ["systemd:^unifi\\.service$"]
+    },
+    "mssql": {
+      "runtime": ["winservice:^MSSQL(\\$\\S+|SERVER)$"]
+    },
+    "iis": {
+      "runtime": ["winservice:^W3SVC$"]
+    },
+    "msexch": {
+      "runtime": ["winservice:^MSExchange(IS|Transport)$"]
+    }
+  },
+  "_comment_section_data": "A section has data if it has at least one line that is not empty, not a [subsection] header and not matching no_data_lines. section_data.<section>: additionally one data line must match the regex.",
+  "section_data": {
+    "zfs_arc_cache": "^hits\\s*=\\s*[1-9]"
+  },
+  "no_data_lines": [
+    "^\\s*no pools available\\s*$"
+  ],
+  "_comment_section_ignore": "Sections that never count as evidence.",
+  "section_ignore": []
+}
