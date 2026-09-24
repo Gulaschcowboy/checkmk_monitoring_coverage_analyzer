@@ -30,6 +30,12 @@
 #     Refresh-Ticks (nur store_piggyback_raw_data erneut mit gleichem
 #     Inhalt + neuem message_timestamp aufgerufen).
 # Beide Zeilen erscheinen IMMER zusammen.
+#
+# 0.9.0-b21: Status, Coverage und Texte werden hier aus den ungefilterten
+# Items der Section berechnet (lib/evaluate.py, gemeinsam mit der GUI-
+# Seite) - dadurch wirken Ignore-Regeln und der Modus fuer generische
+# Kandidaten (Setup-Regel "Monitoring coverage analysis") sofort nach
+# "Activate changes", ohne neuen Analyse-Lauf.
 from __future__ import annotations
 
 import json
@@ -48,6 +54,8 @@ from cmk.agent_based.v2 import (
     State,
     StringTable,
 )
+
+from cmk_addons.plugins.monitoring_coverage_analyzer.lib import evaluate as _ev
 
 SECTION_NAME = "checkmk_monitoring_coverage"
 
@@ -90,12 +98,28 @@ def _format_age(seconds: float) -> str:
     return f"{hours}h {minutes}min"
 
 
-def check_monitoring_coverage(section: Mapping[str, Any]) -> CheckResult:
-    status = str(section.get("status", "UNKNOWN"))
-    coverage_pct = section.get("coverage_pct")
-    fraction_text = str(section.get("fraction_text", ""))
-    findings = str(section.get("findings", ""))
+def check_monitoring_coverage(params: Mapping[str, Any], section: Mapping[str, Any]) -> CheckResult:
     now = time.time()
+    items = section.get("items")
+    if isinstance(items, list):
+        evaluation = _ev.evaluate(items, params)
+        status = evaluation.status
+        coverage_pct: Any = evaluation.coverage_pct
+        fraction_text = evaluation.fraction_text
+        findings = evaluation.findings
+        detail_lines: Any = _ev.detail_lines(
+            evaluation,
+            [str(x) for x in section.get("source_lines") or []],
+            str(params.get("generic_candidates", _ev.GENERIC_INFO)),
+        )
+    else:
+        # Section eines aelteren Analyse-Laufs (vor b21): fertiges Ergebnis,
+        # Regeln wirken erst nach dem naechsten Lauf.
+        status = str(section.get("status", "UNKNOWN"))
+        coverage_pct = section.get("coverage_pct")
+        fraction_text = str(section.get("fraction_text", ""))
+        findings = str(section.get("findings", ""))
+        detail_lines = section.get("detail_lines") or []
 
     state_map = {"OK": State.OK, "WARN": State.WARN, "CRIT": State.CRIT}
     state = state_map.get(status, State.UNKNOWN)
@@ -110,7 +134,6 @@ def check_monitoring_coverage(section: Mapping[str, Any]) -> CheckResult:
     if isinstance(coverage_pct, (int, float)):
         yield Metric("coverage_percent", float(coverage_pct), boundaries=(0, 100))
 
-    detail_lines = section.get("detail_lines") or []
     if isinstance(detail_lines, list) and detail_lines:
         yield Result(
             state=State.OK,
@@ -154,4 +177,6 @@ check_plugin_checkmk_monitoring_coverage = CheckPlugin(
     service_name="Checkmk Monitoring Coverage",
     discovery_function=discover_monitoring_coverage,
     check_function=check_monitoring_coverage,
+    check_ruleset_name="checkmk_monitoring_coverage",
+    check_default_parameters={},
 )

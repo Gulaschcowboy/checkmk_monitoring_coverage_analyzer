@@ -213,5 +213,7 @@
     "^\\s*no pools available\\s*$"
   ],
   "_comment_section_ignore": "Sections that never count as evidence.",
-  "section_ignore": []
+  "section_ignore": [],
+  "_comment_generic_ignore_families": "Check plug-in families never suggested by the generic match (names too common to be evidence). Families known from 'titles'/'aliases' are handled by the curated rules only.",
+  "generic_ignore_families": ["local", "win", "job", "custom", "metric"]
 }

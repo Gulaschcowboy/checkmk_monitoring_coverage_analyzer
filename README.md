@@ -24,6 +24,11 @@ so no additional agent queries are made).
   cron jobs themselves, so run it once after installing or updating.
 - **Rules file** `monitoring_coverage_analyzer_rules.json`: aliases,
   titles, hints and detection rules. Can be adjusted without code changes.
+- **Setup rule** "Monitoring coverage analysis" (Setup > Services >
+  Service monitoring rules): ignore findings (false positives or accepted
+  gaps) by regular expressions on subsystem, check plug-in and evidence,
+  and choose whether generic candidates are info only or WARN. Applies to
+  the service and the GUI page alike, right after activating changes.
 
 ## Evidence sources
 
@@ -34,6 +39,14 @@ so no additional agent queries are made).
 5. Runtime evidence via `detect` rules: running systemd units, processes
    and Windows services.
 6. Installed inventory packages: informational only, no effect on status.
+7. Generic match: the leading name part of running systemd units,
+   processes and Windows services is matched against the families of all
+   agent-based check plug-ins of the site, including installed MKPs. This
+   finds subsystems without a curated rule. Built-in filters: SNMP-only
+   plug-ins, families covered by curated rules, stop tokens,
+   `generic_ignore_families`, families already monitored on the host, and
+   families running on nearly all hosts of the same OS. Shown as info by
+   default (see Setup rule).
 
 A subsystem is reported only if the site has a matching check plug-in
 (`cmk -L`). Rules may exclude operating systems where a plug-in cannot
@@ -52,7 +65,8 @@ omd restart apache
 
 ```
 local/bin/                                   cron + setup scripts
-local/lib/python3/cmk_addons/plugins/...     piggyback check plug-in
+local/lib/python3/cmk_addons/plugins/...     check plug-in, Setup rule,
+                                             shared evaluation (lib/)
 local/share/check_mk/web/plugins/pages/      GUI page + rules file
 local/share/check_mk/web/plugins/wato/       menu entry, global settings
 local/share/check_mk/web/plugins/config/     config defaults

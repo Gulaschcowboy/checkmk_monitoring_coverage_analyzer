@@ -142,6 +142,10 @@ from cmk.gui.pages import Page, PageContext, PageEndpoint, PageResult, page_regi
 from cmk.gui.utils.html import HTML
 from cmk.gui.utils.urls import makeuri_contextless
 
+# 0.9.0-b21: gemeinsame Auswertung (Ignore-Regeln, Status, Coverage, Texte)
+# mit dem Check-Plugin - beide wenden die Setup-Regel gleich an.
+from cmk_addons.plugins.monitoring_coverage_analyzer.lib import evaluate as _ev
+
 # Ausbaustufe 2.0.0: offizielle Piggyback-Schreib-API - live auf
 # Test-Site/Checkmk 2.5.0p12 Ultimate per
 # "python3 -c 'import inspect,cmk.piggyback.backend as b;
@@ -234,6 +238,9 @@ class _Rules(NamedTuple):
     section_data: dict[str, str]
     section_ignore: frozenset[str]
     no_data_lines: list[str]
+    # 0.9.0-b21: Plug-in-Familien, die der generische Abgleich nie
+    # vorschlaegt (zu allgemeine Namen wie "local", "win", "job").
+    generic_ignore_families: frozenset[str] = frozenset()
 
 
 class RulesLoadError(RuntimeError):
@@ -362,6 +369,9 @@ def _load_rules() -> _Rules:
     } if isinstance(data.get("section_data"), dict) else {}
     section_ignore = frozenset(str(x) for x in data.get("section_ignore") or [])
     no_data_lines = [str(x) for x in data.get("no_data_lines") or []]
+    generic_ignore_families = frozenset(
+        str(x).lower() for x in data.get("generic_ignore_families") or []
+    )
     for pattern in [*section_data.values(), *no_data_lines]:
         try:
             re.compile(pattern)
@@ -375,7 +385,8 @@ def _load_rules() -> _Rules:
             "und/oder 'titles' sind leer oder fehlen."
         )
     return _Rules(
-        aliases, titles, hints, stop_tokens, detect, section_data, section_ignore, no_data_lines
+        aliases, titles, hints, stop_tokens, detect, section_data, section_ignore, no_data_lines,
+        generic_ignore_families,
     )
 
 
@@ -393,6 +404,7 @@ DETECT: dict[str, dict[str, list[str]]] = {}
 SECTION_DATA: dict[str, str] = {}
 SECTION_IGNORE: frozenset[str] = frozenset()
 NO_DATA_LINES: list[str] = []
+GENERIC_IGNORE_FAMILIES: frozenset[str] = frozenset()
 
 
 def _reload_rules() -> None:
@@ -408,8 +420,9 @@ def _reload_rules() -> None:
     TITLES.update(rules.titles)
     HINTS.clear()
     HINTS.update(rules.hints)
-    global STOP_TOKENS, SECTION_IGNORE
+    global STOP_TOKENS, SECTION_IGNORE, GENERIC_IGNORE_FAMILIES
     STOP_TOKENS = rules.stop_tokens
+    GENERIC_IGNORE_FAMILIES = rules.generic_ignore_families
     DETECT.clear()
     DETECT.update(rules.detect)
     SECTION_DATA.clear()
@@ -455,7 +468,7 @@ except RulesLoadError:
 # pro Host: analog available_plugins() im Referenz-Special-Agent-Skript
 # libexec/agent_monitoring_coverage.
 _AVAILABLE_PLUGINS_CACHE_TTL = 60.0
-_available_plugins_cache: dict[str, tuple[float, dict[str, list[str]]]] = {}
+_available_plugins_cache: dict[str, tuple[float, Any]] = {}
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _SAFE_HOST_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
@@ -487,6 +500,33 @@ def _canonical_token(raw: str) -> str:
     return ALIASES.get(token, token)
 
 
+def _cmk_list_plugins() -> list[tuple[str, str, str]]:
+    """'cmk -L' -> [(plugin, typ, titel)], typ z.B. "agent", "snmp",
+    "active". Gleicher TTL-Cache wie _available_plugin_map()."""
+    now = time.time()
+    cached = _available_plugins_cache.get("rows")
+    if cached is not None and (now - cached[0]) < _AVAILABLE_PLUGINS_CACHE_TTL:
+        return cached[1]
+    rows: list[tuple[str, str, str]] = []
+    try:
+        proc = subprocess.run(
+            ["cmk", "-L"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        for line in proc.stdout.splitlines():
+            parts = line.strip().split(None, 2)
+            if not parts:
+                continue
+            rows.append((parts[0], parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else ""))
+    except Exception:  # pragma: no cover - defensive, GUI-Kontext
+        rows = []
+    _available_plugins_cache["rows"] = (now, rows)
+    return rows
+
+
 def _available_plugin_map() -> dict[str, list[str]]:
     """Liefert token -> sortierte Liste der auf der Site per 'cmk -L'
     verfuegbaren Check-Plugin-Namen (kanonisiert via ALIASES), mit
@@ -502,26 +542,10 @@ def _available_plugin_map() -> dict[str, list[str]]:
         return cached[1]
 
     plugin_map: dict[str, set[str]] = {}
-    try:
-        proc = subprocess.run(
-            ["cmk", "-L"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        for line in proc.stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            # 'cmk -L' gibt pro Zeile u.a. den Plugin-Namen als erstes Wort
-            # aus (z.B. "mysql_capacity", "apache_status", ...).
-            first_word = line.split()[0] if line.split() else ""
-            token = _canonical_token(first_word)
-            if token and token not in STOP_TOKENS:
-                plugin_map.setdefault(token, set()).add(first_word)
-    except Exception:  # pragma: no cover - defensive, PoC/GUI-Kontext
-        plugin_map = {}
+    for first_word, _ptype, _title in _cmk_list_plugins():
+        token = _canonical_token(first_word)
+        if token and token not in STOP_TOKENS:
+            plugin_map.setdefault(token, set()).add(first_word)
 
     result = {token: sorted(names) for token, names in plugin_map.items()}
     # Schritt 3: der aktive Check "cmk_inv" (Checkmk HW/SW Inventory) ist
@@ -780,6 +804,8 @@ class _Runtime(NamedTuple):
     systemd_running: list[str]
     processes: list[str]
     win_services_running: list[str]
+    # 0.9.0-b21: Dienstname -> Anzeigename (fuer den generischen Abgleich)
+    win_service_titles: dict[str, str] = {}
 
 
 def _runtime_facts(sections: Mapping[str, list[str]]) -> _Runtime:
@@ -813,11 +839,14 @@ def _runtime_facts(sections: Mapping[str, list[str]]) -> _Runtime:
             first = command.split()[0] if command.split() else ""
             processes.append(re.split(r"[\\/]", first)[-1])
     services: list[str] = []
+    service_titles: dict[str, str] = {}
     for line in sections.get("services", []):
         parts = line.split(None, 2)
         if len(parts) >= 2 and parts[1].startswith("running"):
             services.append(parts[0])
-    return _Runtime(units, processes, services)
+            if len(parts) > 2:
+                service_titles[parts[0]] = parts[2].strip()
+    return _Runtime(units, processes, services, service_titles)
 
 
 def _match_condition(
@@ -867,6 +896,196 @@ def _match_condition(
     return None
 
 
+# ---------------------------------------------------------------------------
+# 0.9.0-b21: generischer (unscharfer) Abgleich - findet Subsysteme OHNE
+# Eintrag in der Regel-Datei: fuehrender Namensteil laufender systemd-
+# Units, Prozesse und Windows-Dienste gegen die Familien der Agent-
+# basierten Check-Plug-ins dieser Site ('cmk -L', Typ "agent"; SNMP-Plug-
+# ins koennen fuer einen Agent-Host nie ein fehlendes Agent-Plug-in
+# bedeuten). Filter gegen Unsinn:
+#   - Familien, die die Regel-Datei kennt (TITLES/ALIASES), entscheidet
+#     ausschliesslich die kuratierte Logik (z.B. ZFS braucht echte Daten).
+#   - stop_tokens und generic_ignore_families der Regel-Datei.
+#   - Familie auf dem Host schon ueberwacht (ein Check-Plug-in der
+#     Familie laeuft).
+#   - Familie laeuft auf fast allen Hosts desselben OS (Basis-OS-Dienst),
+#     siehe _GENERIC_COMMON_* in _query_and_analyze_hosts().
+# Eigene Ausnahmen: Setup-Regel "Monitoring coverage analysis".
+# ---------------------------------------------------------------------------
+_GENERIC_SUFFIX_RE = re.compile(r"\.(service|socket|timer|scope|exe)$", re.IGNORECASE)
+_GENERIC_CAMEL_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+")
+_GENERIC_MIN_LEN = 3
+# Familie wird unterdrueckt, wenn sie auf >= 80 % der Hosts desselben OS
+# vorkommt - nur bei mindestens 5 Hosts dieses OS.
+_GENERIC_COMMON_MIN_HOSTS = 5
+_GENERIC_COMMON_RATIO = 0.8
+_GENERIC_MAX_EVIDENCE = 3
+
+
+def _plugin_family(plugin: str) -> str:
+    """'mssql_counters.locks' -> 'mssql', 'zpool_status' -> 'zpool'."""
+    head = re.split(r"[_.\-]", plugin.strip().lower())[0]
+    return re.sub(r"\d+$", "", head)
+
+
+def _generic_name_tokens(*names: str) -> list[str]:
+    """Fuehrender Namensteil (plus erstes CamelCase-Wort) je Name:
+    'postgresql@15-main.service' -> ['postgresql'],
+    'MSSQL$SQLEXPRESS' -> ['mssql'], 'MSExchangeIS' -> ['msexchangeis', 'ms']."""
+    out: list[str] = []
+    for name in names:
+        if not name:
+            continue
+        cleaned = _GENERIC_SUFFIX_RE.sub("", name.strip()).split("@")[0]
+        parts = [part for part in re.split(r"[^A-Za-z0-9]+", cleaned) if part]
+        if not parts:
+            continue
+        candidates = [parts[0]]
+        camel = _GENERIC_CAMEL_RE.findall(parts[0])
+        if camel:
+            candidates.append(camel[0])
+        for candidate in candidates:
+            token = re.sub(r"\d+$", "", candidate.lower())
+            if len(token) >= _GENERIC_MIN_LEN and token not in out:
+                out.append(token)
+    return out
+
+
+def _generic_token_matches(token: str, family: str) -> bool:
+    """Gleich, oder Familie ist Praefix mit kurzem Rest ('postgresql' ->
+    'postgres', 'mssqlserver' -> 'mssql'). Kurze Familien (3 Zeichen) nur
+    exakt."""
+    if token == family:
+        return True
+    return len(family) >= 4 and token.startswith(family) and len(token) - len(family) <= 6
+
+
+class _GenericFamily(NamedTuple):
+    title: str
+    plugins: list[str]
+
+
+def _generic_catalog() -> dict[str, _GenericFamily]:
+    """Familie -> (Titel, Plug-ins) aller Agent-basierten Check-Plug-ins,
+    die NICHT von der Regel-Datei abgedeckt sind. Titel aus dem Katalog-
+    Titel ('ACME SBC: Health' -> 'ACME SBC')."""
+    grouped: dict[str, list[tuple[str, str]]] = {}
+    for name, ptype, title in _cmk_list_plugins():
+        if ptype != "agent":
+            continue
+        family = _plugin_family(name)
+        if (
+            len(family) < _GENERIC_MIN_LEN
+            or family in STOP_TOKENS
+            or family in GENERIC_IGNORE_FAMILIES
+            or _canonical_token(family) in TITLES
+            or _canonical_token(name) in TITLES
+        ):
+            continue
+        grouped.setdefault(family, []).append((name, title))
+    catalog: dict[str, _GenericFamily] = {}
+    for family, entries in grouped.items():
+        catalog[family] = _GenericFamily(
+            _generic_title(family, [t for _n, t in entries]), sorted(n for n, _t in entries)
+        )
+    return catalog
+
+
+def _generic_title(family: str, titles: Sequence[str]) -> str:
+    """Titel aus den Katalog-Titeln: gemeinsame fuehrende Woerter der Teile
+    vor ':' ('Couchbase Nodes: ...', 'Couchbase Buckets: ...' ->
+    'Couchbase'); ohne ':' im Katalog-Titel der Familienname."""
+    prefixes = [t.split(":")[0].split() for t in titles if ":" in t]
+    if not prefixes:
+        return family.title()
+    common = prefixes[0]
+    for words in prefixes[1:]:
+        n = 0
+        while n < min(len(common), len(words)) and common[n].lower() == words[n].lower():
+            n += 1
+        common = common[:n]
+    if common:
+        return " ".join(common)
+    counts: dict[str, int] = {}
+    for words in prefixes:
+        counts[" ".join(words)] = counts.get(" ".join(words), 0) + 1
+    return max(counts.items(), key=lambda kv: (kv[1], -len(kv[0])))[0]
+
+
+def _generic_candidates(
+    runtime: _Runtime,
+    check_commands: Sequence[str],
+    catalog: Mapping[str, _GenericFamily],
+) -> dict[str, list[str]]:
+    """Familie -> Belege fuer einen Host (ohne OS-Haeufigkeitsfilter)."""
+    monitored_families = {
+        _plugin_family(cmd[len("check_mk-"):].split("!")[0])
+        for cmd in check_commands
+        if cmd.startswith("check_mk-")
+    }
+    evidence_sources: list[tuple[str, list[str]]] = []
+    for unit in runtime.systemd_running:
+        evidence_sources.append((f"systemd unit '{unit}' running", _generic_name_tokens(unit)))
+    for proc in dict.fromkeys(runtime.processes):
+        evidence_sources.append((f"process '{proc}'", _generic_name_tokens(proc)))
+    for service in runtime.win_services_running:
+        display = runtime.win_service_titles.get(service, "")
+        text = f"Windows service '{service}'" + (f" ({display})" if display else "") + " running"
+        evidence_sources.append((text, _generic_name_tokens(service, display)))
+
+    found: dict[str, list[str]] = {}
+    for text, tokens in evidence_sources:
+        for token in tokens:
+            if token in STOP_TOKENS:
+                continue
+            for family in catalog:
+                if family in monitored_families or not _generic_token_matches(token, family):
+                    continue
+                items = found.setdefault(family, [])
+                if text not in items:
+                    items.append(text)
+    return found
+
+
+def _generic_by_host(
+    agent_rows: Sequence[tuple[str, Mapping[str, str]]],
+    sections_by_host: Mapping[str, _AgentSections],
+    check_commands_by_host: Mapping[str, list[str]],
+    catalog: Mapping[str, _GenericFamily],
+) -> dict[str, dict[str, list[str]]]:
+    """Generische Kandidaten aller Hosts, ohne Familien, die auf fast allen
+    Hosts desselben OS (Label cmk/os_family) laufen."""
+    found_by_host: dict[str, dict[str, list[str]]] = {}
+    os_by_host: dict[str, str] = {}
+    hosts_per_os: dict[str, int] = {}
+    for host_name, labels in agent_rows:
+        sec = sections_by_host.get(host_name)
+        if sec is None or not sec.sections:
+            continue
+        os_family = str(labels.get("cmk/os_family", "")).strip().lower() or "?"
+        os_by_host[host_name] = os_family
+        hosts_per_os[os_family] = hosts_per_os.get(os_family, 0) + 1
+        found_by_host[host_name] = _generic_candidates(
+            _runtime_facts(sec.sections), check_commands_by_host.get(host_name, []), catalog
+        )
+    per_os_family: dict[tuple[str, str], int] = {}
+    for host_name, found in found_by_host.items():
+        for family in found:
+            key = (os_by_host[host_name], family)
+            per_os_family[key] = per_os_family.get(key, 0) + 1
+    common = {
+        key
+        for key, count in per_os_family.items()
+        if hosts_per_os.get(key[0], 0) >= _GENERIC_COMMON_MIN_HOSTS
+        and count / hosts_per_os[key[0]] >= _GENERIC_COMMON_RATIO
+    }
+    for host_name, found in found_by_host.items():
+        for family in list(found):
+            if (os_by_host[host_name], family) in common:
+                del found[family]
+    return found_by_host
+
+
 class _Subsystem(NamedTuple):
     token: str
     title: str
@@ -898,6 +1117,12 @@ class _HostResult(NamedTuple):
     unmonitored_lines: list[str] = []
     monitored_lines: list[str] = []
     source_lines: list[str] = []
+    # 0.9.0-b21: ungefilterte Items (siehe lib/evaluate.py). Status und
+    # Texte oben sind die Auswertung OHNE Setup-Regel; Seite und Check
+    # werten die Items mit der fuer den Host gueltigen Regel neu aus.
+    items: list[dict[str, Any]] = []
+    candidate_lines: list[str] = []
+    ignored_lines: list[str] = []
 
 
 def _monitored_map_for_host(check_commands: Sequence[str]) -> dict[str, list[str]]:
@@ -928,18 +1153,24 @@ def _monitored_map_for_host(check_commands: Sequence[str]) -> dict[str, list[str
     return {token: sorted(names) for token, names in result.items()}
 
 
-def _detail_sections(
-    unmonitored_lines: Sequence[str],
-    monitored_lines: Sequence[str],
-    source_lines: Sequence[str],
-) -> list[tuple[str, list[str]]]:
-    """Detail-Abschnitte in fester Reihenfolge; leere Abschnitte entfallen."""
+def _detail_sections_for(result: _HostResult, lookup: Any) -> list[tuple[str, list[str]]]:
+    """Detail-Abschnitte der Seite (gleiche Reihenfolge wie im Long Output
+    des Service); leere Abschnitte entfallen."""
+    params = lookup.params_for(result.host_name) if result.items else {}
+    mode = str(params.get("generic_candidates", _ev.GENERIC_INFO))
+    candidate_heading = (
+        _("Candidates (generic match):")
+        if mode == _ev.GENERIC_WARN
+        else _("Candidates (generic match, info only):")
+    )
     return [
         (heading, list(lines))
         for heading, lines in (
-            (_("Unmonitored:"), unmonitored_lines),
-            (_("Already monitored:"), monitored_lines),
-            (_("Sources:"), source_lines),
+            (_("Unmonitored:"), result.unmonitored_lines),
+            (candidate_heading, result.candidate_lines),
+            (_("Ignored:"), result.ignored_lines),
+            (_("Already monitored:"), result.monitored_lines),
+            (_("Sources:"), result.source_lines),
         )
         if lines
     ]
@@ -951,6 +1182,8 @@ def _analyze_host(
     check_commands: Sequence[str],
     available_map: dict[str, list[str]],
     agent_sections: _AgentSections | None = None,
+    generic_found: Mapping[str, list[str]] | None = None,
+    generic_catalog: Mapping[str, _GenericFamily] | None = None,
 ) -> _HostResult:
     """Coverage-Korrelation fuer einen einzelnen Host (Stand 0.9.0-b14).
 
@@ -973,6 +1206,10 @@ def _analyze_host(
     check_command ist es ein offenes Finding - seit b14 immer WARN, der
     Text unterscheidet "Daten kommen an / Plug-in ausgeliefert" (Discovery
     fehlt) von "laeuft" (Agent-Plug-in fehlt).
+
+    0.9.0-b21: dazu generische Kandidaten (generic_found, siehe
+    _generic_candidates()) und Rueckgabe der ungefilterten Items - die
+    Auswertung (Status, Coverage, Texte) macht lib/evaluate.py.
 
     Installierte Pakete aus dem HW/SW-Inventory (T_INV_PACKAGE) sind seit
     b14 KEIN Beleg mehr (False Positives, z.B. lvm2 ohne ein einziges LV),
@@ -1087,41 +1324,47 @@ def _analyze_host(
             )
         )
 
-    total = len(subsystems)
-    monitored_n = sum(1 for s in subsystems if s.monitored)
-    open_n = total - monitored_n
-    coverage_pct = 100 if total == 0 else round(100 * monitored_n / total)
-    fraction_text = _("%d/%d monitorable subsystems monitored") % (monitored_n, total) \
-        if total else _("no monitorable subsystems detected")
-
-    findings_parts: list[str] = []
-    unmonitored_lines: list[str] = []
-    monitored_lines: list[str] = []
-    source_lines: list[str] = []
-    for s in sorted(subsystems, key=lambda s: s.title):
+    # 0.9.0-b21: ungefilterte Items; Status/Coverage/Texte entstehen in
+    # lib/evaluate.py (gemeinsam mit dem Check-Plugin).
+    items: list[dict[str, Any]] = []
+    for s in subsystems:
         if s.monitored:
-            monitored_lines.append(_("%s: monitored (via %s)") % (s.title, ", ".join(s.via)))
+            items.append({
+                "kind": "monitored", "token": s.token, "title": s.title,
+                "plugins": list(s.via), "evidence": list(s.evidence), "state": "monitored",
+            })
             continue
-        evidence_txt = "; ".join(s.evidence)
         state_txt = {
             "delivered": _("agent delivers data, not monitored"),
             "deployed": _("agent plug-in deployed, not monitored"),
             "running": _("running, not monitored"),
         }.get(s.kind, _("detected, not monitored"))
-        line = _("%s: %s – available plug-in(s): %s [detected via %s]") % (
-            s.title, state_txt, ", ".join(s.via), evidence_txt,
-        )
-        unmonitored_lines.append(line)
         if s.kind in ("delivered", "deployed"):
             # Daten sind schon da - ein Plug-in-Deployment-Hinweis waere
             # hier falsch, es fehlt nur die Service-Discovery.
             hint = _("Run service discovery for this host.")
         else:
             hint = HINTS.get(s.token, "")
-        findings_parts.append(
-            _("%s: %s%s") % (s.title, state_txt, f" ({hint})" if hint else "")
-        )
+        items.append({
+            "kind": "open", "token": s.token, "title": s.title,
+            "plugins": list(s.via), "evidence": list(s.evidence),
+            "state": state_txt, "hint": hint,
+        })
+    for family, evidence in sorted((generic_found or {}).items()):
+        entry = (generic_catalog or {}).get(family)
+        if entry is None:
+            continue
+        shown = evidence[:_GENERIC_MAX_EVIDENCE]
+        if len(evidence) > len(shown):
+            shown.append(f"... (+{len(evidence) - len(shown)})")
+        items.append({
+            "kind": "candidate", "token": f"generic:{family}", "title": entry.title,
+            "plugins": list(entry.plugins), "evidence": shown,
+            "state": _("running, not monitored (generic match)"),
+            "hint": _("Check if an agent plug-in or special agent for '%s' exists and deploy it, then run discovery.") % entry.title,
+        })
 
+    source_lines: list[str] = []
     type_counts: dict[str, int] = {
         t: sum(1 for by_type in capability_evidence.values() if t in by_type)
         for t in (T_CHECK, T_LABEL, T_SECTION, T_PLUGIN, T_RUNTIME)
@@ -1170,32 +1413,34 @@ def _analyze_host(
             _("Agent sections: %d via %s") % (len(raw_sections), agent_sections.source)
         )
 
-    detail_lines: list[str] = []
-    for heading, lines in _detail_sections(unmonitored_lines, monitored_lines, source_lines):
-        if detail_lines:
-            detail_lines.append("")
-        detail_lines.append(heading)
-        detail_lines.extend(lines)
+    return _build_result(host_name, items, source_lines, capability_summary, None)
 
-    if open_n == 0:
-        status = "OK"
-        findings = _("No open findings.")
-    else:
-        # 0.9.0-b14: alle offenen Findings WARN (User-Vorgabe).
-        status = "WARN"
-        findings = " | ".join(findings_parts)
 
+def _build_result(
+    host_name: str,
+    items: list[dict[str, Any]],
+    source_lines: list[str],
+    capability_summary: str,
+    params: Mapping[str, Any] | None,
+) -> _HostResult:
+    """Auswertung der Items mit den Parametern der Setup-Regel (None = ohne
+    Regel, Default-Verhalten) -> _HostResult fuer Anzeige/Cache."""
+    evaluation = _ev.evaluate(items, params)
+    mode = str((params or {}).get("generic_candidates", _ev.GENERIC_INFO))
     return _HostResult(
         host_name=host_name,
-        status=status,
-        coverage_pct=coverage_pct,
-        fraction_text=fraction_text,
-        findings=findings,
-        detail_lines=detail_lines,
+        status=evaluation.status,
+        coverage_pct=evaluation.coverage_pct,
+        fraction_text=evaluation.fraction_text,
+        findings=evaluation.findings,
+        detail_lines=_ev.detail_lines(evaluation, source_lines, mode),
         capability_summary=capability_summary,
-        unmonitored_lines=unmonitored_lines,
-        monitored_lines=monitored_lines,
-        source_lines=source_lines,
+        unmonitored_lines=evaluation.unmonitored_lines,
+        monitored_lines=evaluation.monitored_lines,
+        source_lines=list(source_lines),
+        items=items,
+        candidate_lines=evaluation.candidate_lines,
+        ignored_lines=evaluation.ignored_lines,
     )
 
 
@@ -1269,6 +1514,12 @@ def _query_and_analyze_hosts() -> Sequence[_HostResult]:
     # dem Core-Cache (get-agent-output @cached) - keine Agent-Abfrage.
     sections_by_host = _collect_agent_sections([h for h, _labels in agent_rows])
 
+    # 0.9.0-b21: generischer Abgleich - erst fuer alle Hosts sammeln, dann
+    # Familien entfernen, die auf fast allen Hosts desselben OS laufen
+    # (Basis-OS-Bestandteile, ohne gepflegte Liste).
+    catalog = _generic_catalog()
+    generic_by_host = _generic_by_host(agent_rows, sections_by_host, check_commands_by_host, catalog)
+
     results: list[_HostResult] = []
     for host_name, labels in agent_rows:
         result = _analyze_host(
@@ -1277,6 +1528,8 @@ def _query_and_analyze_hosts() -> Sequence[_HostResult]:
             check_commands=check_commands_by_host.get(host_name, []),
             available_map=available_map,
             agent_sections=sections_by_host.get(host_name),
+            generic_found=generic_by_host.get(host_name),
+            generic_catalog=catalog,
         )
         results.append(result)
 
@@ -1329,21 +1582,7 @@ def _save_cached_results(
         "generated_at": time.time(),
         "last_full_run_timestamp": last_full_run_timestamp,
         "last_piggyback_refresh_timestamp": last_piggyback_refresh_timestamp,
-        "results": [
-            {
-                "host_name": r.host_name,
-                "status": r.status,
-                "coverage_pct": r.coverage_pct,
-                "fraction_text": r.fraction_text,
-                "findings": r.findings,
-                "detail_lines": list(r.detail_lines),
-                "capability_summary": r.capability_summary,
-                "unmonitored_lines": list(r.unmonitored_lines),
-                "monitored_lines": list(r.monitored_lines),
-                "source_lines": list(r.source_lines),
-            }
-            for r in results
-        ],
+        "results": [r._asdict() for r in results],
     }
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1409,6 +1648,11 @@ def _build_piggyback_payload(
         "findings": result.findings,
         "detail_lines": list(result.detail_lines),
         "capability_summary": result.capability_summary,
+        # 0.9.0-b21: ungefilterte Items + Quellen - das Check-Plugin wertet
+        # sie mit der Setup-Regel des Hosts aus (status/findings oben sind
+        # nur der Stand ohne Regel, fuer aeltere Check-Plugins).
+        "items": list(result.items),
+        "source_lines": list(result.source_lines),
         "last_full_run_timestamp": last_full_run_timestamp,
         "last_piggyback_refresh_timestamp": last_piggyback_refresh_timestamp,
     }
@@ -1662,6 +1906,69 @@ def _is_full_run_due(*, force: bool) -> tuple[bool, str]:
     return False, f"age {age:.0f}s < interval {interval_seconds}s - grace {_FULL_RUN_DUE_GRACE_SECONDS}s"
 
 
+# 0.9.0-b21: Setup-Regel "Monitoring coverage analysis" (rulesets/
+# monitoring_coverage.py) - dieselbe Regel, die das Check-Plugin als
+# Parameter bekommt. Die Seite wertet sie pro Host ueber die Checkmk-
+# eigene Regelauswertung aus (wie "Effective parameters of" im Setup).
+_RULESET_NAME = "checkgroup_parameters:checkmk_monitoring_coverage"
+
+
+class _RuleLookup:
+    def __init__(self) -> None:
+        self.error: str | None = None
+        self._ruleset: Any = None
+        self._memo: dict[str, dict[str, Any]] = {}
+        try:
+            from cmk.gui.watolib.rulesets import SingleRulesetRecursively
+
+            rulesets = SingleRulesetRecursively.load_single_ruleset_recursively(_RULESET_NAME)
+            ruleset = rulesets.get(_RULESET_NAME)
+            if ruleset is not None and not ruleset.is_empty():
+                self._ruleset = ruleset
+        except Exception as exc:  # pragma: no cover - defensiv, GUI-Kontext
+            self.error = f"{exc!r}"
+
+    @property
+    def rule_count(self) -> int:
+        return 0 if self._ruleset is None else self._ruleset.num_rules()
+
+    def params_for(self, host_name: str) -> dict[str, Any]:
+        if host_name not in self._memo:
+            self._memo[host_name] = self._lookup(host_name)
+        return self._memo[host_name]
+
+    def _lookup(self, host_name: str) -> dict[str, Any]:
+        if self._ruleset is None:
+            return {}
+        try:
+            value, _rules = self._ruleset.analyse_ruleset(
+                host_name, None, PIGGYBACK_SERVICE_TITLE, {}, debug=False
+            )
+        except Exception as exc:  # pragma: no cover - defensiv, GUI-Kontext
+            self.error = f"{host_name}: {exc!r}"
+            return {}
+        if isinstance(value, dict) and "tp_default_value" in value:
+            # Zeitabhaengige Parameter: die Seite nutzt den Default-Wert.
+            value = value.get("tp_default_value")
+        return dict(value) if isinstance(value, dict) else {}
+
+
+def _apply_rules(results: Sequence[_HostResult], lookup: _RuleLookup) -> list[_HostResult]:
+    """Wertet die Items jedes Hosts mit seiner Setup-Regel neu aus."""
+    out: list[_HostResult] = []
+    for r in results:
+        if not r.items:
+            out.append(r)  # Cache vor b21 ohne Items
+            continue
+        out.append(
+            _build_result(
+                r.host_name, list(r.items), list(r.source_lines), r.capability_summary,
+                lookup.params_for(r.host_name),
+            )
+        )
+    return out
+
+
 def _page_breadcrumb() -> Breadcrumb:
     """Setup > Maintenance > Analyze monitoring coverage - wie bei den
     eingebauten Maintenance-Seiten (z.B. "Analyze configuration", dort via
@@ -1782,10 +2089,17 @@ class PageMonitoringCoverageAnalyzer(Page):
                 _save_cached_results(results, last_full_run_timestamp=time.time())
             generated_at = time.time()
 
+        lookup = _RuleLookup()
+        results = _apply_rules(results, lookup)
+
         html.h3(_("Analysis result"))
         age_txt = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(generated_at))
         html.p(_("Result from: %s (cached until next re-run)") % age_txt)
         html.p(_("Findings/hints rules source: %s") % _rules_source_status())
+        rules_txt = _("Setup rule 'Monitoring coverage analysis': %d rule(s)") % lookup.rule_count
+        if lookup.error:
+            rules_txt += " - " + _("error: %s") % lookup.error
+        html.p(rules_txt)
 
         if not results:
             html.show_message(
@@ -1854,9 +2168,7 @@ class PageMonitoringCoverageAnalyzer(Page):
             html.open_td()
             html.close_td()
             html.open_td(colspan=5)
-            sections = _detail_sections(
-                result.unmonitored_lines, result.monitored_lines, result.source_lines
-            )
+            sections = _detail_sections_for(result, lookup)
             if sections:
                 for heading, lines in sections:
                     # Kein html.h4() in dieser Checkmk-Version (nur h1-h3);
