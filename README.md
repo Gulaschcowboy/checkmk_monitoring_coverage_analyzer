@@ -4,7 +4,7 @@ Checkmk extension (MKP) that finds applications and subsystems on
 agent-monitored hosts that are running but not yet monitored, and tells you
 which plug-in or special agent would cover them.
 
-Requires Checkmk 2.5.0p14 or later (uses `get-agent-output ... @cached`,
+Requires Checkmk 2.5.0p15 or later (uses `get-agent-output ... @cached`,
 so no additional agent queries are made).
 
 ## Components
@@ -47,9 +47,6 @@ mkp enable monitoring_coverage_analyzer <version>
 monitoring_coverage_analyzer-setup
 omd restart apache
 ```
-
-When updating from 0.9.0-b10 or older, run a service discovery for the
-"Checkmk Monitoring Coverage" service (check plug-in was renamed).
 
 ## Repository layout
 
