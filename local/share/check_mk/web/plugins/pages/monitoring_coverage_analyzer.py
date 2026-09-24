@@ -1444,6 +1444,18 @@ def _build_result(
     )
 
 
+# 0.9.0-b22: Betriebssysteme, deren Hosts analysiert werden.
+_AGENT_OS_TYPES = frozenset({"linux", "windows", "freebsd", "solaris", "aix"})
+
+
+def _host_os(labels: Mapping[str, str]) -> str:
+    """OS des Hosts aus den Agent-Labels: cmk/os_type (z.B. "linux" auch
+    fuer UniFi OS / OpenWrt, deren cmk/os_family abweicht), bei aelteren
+    Agenten ohne cmk/os_type ersatzweise cmk/os_family."""
+    value = labels.get("cmk/os_type") or labels.get("cmk/os_family") or ""
+    return str(value).strip().lower()
+
+
 def _query_and_analyze_hosts() -> Sequence[_HostResult]:
     """Ermittelt per Livestatus alle Hosts, die per Checkmk-Agent (TCP)
     ueberwacht werden, und wendet auf jeden Host die Coverage-Korrelation
@@ -1508,7 +1520,14 @@ def _query_and_analyze_hosts() -> Sequence[_HostResult]:
         ) == "checkmk-agent"
         if not is_cmk_agent_host:
             continue
-        agent_rows.append((host_name, labels if isinstance(labels, dict) else {}))
+        label_map = labels if isinstance(labels, dict) else {}
+        # 0.9.0-b22: das tcp-Tag allein ist zu unscharf (auch Special-Agent-
+        # und Piggyback-Hosts, Router mit eigenem Agenten). Zusaetzlich muss
+        # der Agent ein Betriebssystem melden, fuer das es Agent-Plug-ins
+        # gibt - siehe _host_os().
+        if _host_os(label_map) not in _AGENT_OS_TYPES:
+            continue
+        agent_rows.append((host_name, label_map))
 
     # 0.9.0-b7: Agent-Ausgaben aller Hosts EINMAL pro Lauf, parallel, aus
     # dem Core-Cache (get-agent-output @cached) - keine Agent-Abfrage.
@@ -1728,6 +1747,37 @@ def _write_piggyback_data(
     return written, last_error
 
 
+def _remove_stale_piggyback(results: Sequence[_HostResult]) -> list[str]:
+    """0.9.0-b22: entfernt die Piggyback-Dateien dieser Quelle fuer Hosts,
+    die nicht mehr analysiert werden (z.B. nach Aenderung der Host-
+    Auswahl) - sonst bliebe dort ein veraltetes Ergebnis liegen. Die
+    Piggyback-API hat dafuer keine Funktion (cleanup_piggyback_files()
+    raeumt nur nach Alter auf); betroffen ist ausschliesslich die Datei
+    <piggyback>/<host>/monitoring_coverage_analyzer."""
+    omd_root = os.environ.get("OMD_ROOT", "")
+    if not omd_root:
+        return []
+    base = os.path.join(omd_root, "tmp", "check_mk", "piggyback")
+    current = {r.host_name for r in results}
+    removed: list[str] = []
+    try:
+        hosts = os.listdir(base)
+    except OSError:
+        return []
+    for host_name in hosts:
+        if host_name in current or not _SAFE_HOST_RE.match(host_name):
+            continue
+        path = os.path.join(base, host_name, PIGGYBACK_SOURCE_HOSTNAME)
+        try:
+            os.remove(path)
+            removed.append(host_name)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+    return removed
+
+
 def _run_piggyback_full(results: Sequence[_HostResult]) -> tuple[int, str | None, float]:
     """Voller Piggyback-Schreib-Lauf mit NEUEM Inhalt: wird direkt nach
     einem echten Full-Run aufgerufen (frisch berechnete 'results'). Setzt
@@ -1739,6 +1789,7 @@ def _run_piggyback_full(results: Sequence[_HostResult]) -> tuple[int, str | None
         last_full_run_timestamp=now,
         last_piggyback_refresh_timestamp=now,
     )
+    _remove_stale_piggyback(results)
     _save_cached_results(
         results,
         last_full_run_timestamp=now,
@@ -2103,7 +2154,11 @@ class PageMonitoringCoverageAnalyzer(Page):
 
         if not results:
             html.show_message(
-                _("No hosts monitored via the Checkmk agent (TCP) were found.")
+                _(
+                    "No hosts monitored via the Checkmk agent (TCP) with a "
+                    "supported operating system (linux, windows, freebsd, "
+                    "solaris, aix) were found."
+                )
             )
             return
 

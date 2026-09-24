@@ -48,6 +48,10 @@ so no additional agent queries are made).
    families running on nearly all hosts of the same OS. Shown as info by
    default (see Setup rule).
 
+Hosts are analyzed if they are monitored via the Checkmk agent (TCP) and
+report a supported operating system (`cmk/os_type`, or `cmk/os_family` for
+older agents): linux, windows, freebsd, solaris, aix.
+
 A subsystem is reported only if the site has a matching check plug-in
 (`cmk -L`). Rules may exclude operating systems where a plug-in cannot
 run (`not_on_os`).
