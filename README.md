@@ -12,7 +12,10 @@ so no additional agent queries are made).
 - **GUI page** "Setup > Maintenance > Analyze monitoring coverage":
   overall coverage across all hosts, duration of the last analysis run,
   and a table with coverage per host, findings, already monitored
-  subsystems and evidence sources. "Re-run analysis" recomputes on demand.
+  subsystems and evidence sources. "Re-run analysis" starts the analysis
+  in the background (outside the web server, so large sites do not hit the
+  Apache timeout); the page reloads until it has finished. The run's log
+  is written to `var/log/monitoring_coverage_analyzer.log`.
 - **Piggyback service** "Checkmk Monitoring Coverage" per host
   (check plug-in `checkmk_monitoring_coverage`), fed from the cached
   analysis result.
@@ -20,6 +23,9 @@ so no additional agent queries are made).
   - `refresh` every 5 minutes: re-sends the last result as piggyback data.
   - `fullrun` daily at 05:00: re-runs the analysis if the configured
     interval (Global setting, default 24 h) has elapsed.
+  - `rerun`: runs the analysis right away (used by "Re-run analysis").
+  - `refresh` and the `fullrun` due check do not load the Checkmk GUI and
+    take well under a second; only an actual analysis run does.
 - **Setup script** `monitoring_coverage_analyzer-setup`
   (`status`, `uninstall`): installs the cron jobs. MKPs cannot register
   cron jobs themselves, so run it once after installing or updating.

@@ -145,23 +145,9 @@ from cmk.gui.utils.urls import makeuri_contextless
 # 0.9.0-b21: gemeinsame Auswertung (Ignore-Regeln, Status, Coverage, Texte)
 # mit dem Check-Plugin - beide wenden die Setup-Regel gleich an.
 from cmk_addons.plugins.monitoring_coverage_analyzer.lib import evaluate as _ev
+from cmk_addons.plugins.monitoring_coverage_analyzer.lib import runstate as _rs
 
-# Ausbaustufe 2.0.0: offizielle Piggyback-Schreib-API - live auf
-# Test-Site/Checkmk 2.5.0p12 Ultimate per
-# "python3 -c 'import inspect,cmk.piggyback.backend as b;
-# print(inspect.signature(b.store_piggyback_raw_data))'" verifiziert:
-# (source_hostname: HostAddress, piggybacked_raw_data: Mapping[HostName,
-# Sequence[bytes]], message_timestamp: float, contact_timestamp: float |
-# None, omd_root: Path) -> None - exakt der im Plan spezifizierte Import
-# und die im Plan spezifizierte Signatur, keine Abweichung noetig.
-try:
-    from cmk.piggyback.backend import store_piggyback_raw_data as _store_piggyback_raw_data
-except ImportError:  # pragma: no cover - defensiv, falls Modulpfad sich
-    # in einer anderen Checkmk-Version verschiebt: Piggyback-Erzeugung
-    # wird dann schlicht deaktiviert (mit klarer Fehlermeldung im
-    # Log/GUI), statt den kompletten Seiten-Import zum Absturz zu
-    # bringen.
-    _store_piggyback_raw_data = None
+# Piggyback-Schreib-API (cmk.piggyback.backend): siehe lib/runstate.py
 
 PAGE_TITLE = _("Analyze monitoring coverage")
 
@@ -1639,14 +1625,14 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
     return results
 
 
-_CACHE_FILE_REL = os.path.join("var", "check_mk", "web", "monitoring_coverage_analyzer_cache.json")
+# 0.9.0-b25: Cache-Datei, Piggyback-Schreiben und Laufzustand liegen in
+# lib/runstate.py (ohne GUI-Importe) - das Cron-Skript nutzt sie fuer die
+# schnellen Wege ohne die GUI hochzufahren. Hier nur duenne Adapter auf
+# _HostResult.
 
 
 def _cache_path() -> str | None:
-    omd_root = os.environ.get("OMD_ROOT", "")
-    if not omd_root:
-        return None
-    return os.path.join(omd_root, _CACHE_FILE_REL)
+    return _rs.cache_path()
 
 
 def _save_cached_results(
@@ -1655,71 +1641,29 @@ def _save_cached_results(
     last_full_run_timestamp: float | None = None,
     last_piggyback_refresh_timestamp: float | None = None,
 ) -> None:
-    """Schritt 2: persistiert das Analyse-Ergebnis als JSON-Datei unterhalb
-    von var/check_mk/web/ auf der Site (analog cmk.ccc.store.
-    save_object_to_file() - hier bewusst ohne Import aus dem Referenz-
-    Paket per einfachem json.dump nachgebaut, um keine harte Abhaengigkeit
-    von internen cmk.*-Modulpfaden einzugehen, die sich zwischen
-    Checkmk-Versionen aendern koennen). Wichtig: eine JSON-Datei statt
-    eines In-Memory-Caches, weil der Checkmk-GUI-Apache i.d.R. mehrere
-    Worker-Prozesse hat, die sich sonst NICHT den gleichen Zustand teilen
-    wuerden.
-
-    Ausbaustufe 2.0.0: uebernimmt zusaetzlich last_full_run_timestamp/
-    last_piggyback_refresh_timestamp aus dem vorherigen Cache-Stand (falls
-    hier nicht explizit uebergeben), damit ein reiner GUI-Aufruf (ohne
-    Piggyback-Bezug) diese Werte nicht versehentlich loescht.
-    """
-    path = _cache_path()
-    if not path:
-        return
-    previous = _load_cache_raw()
-    if last_full_run_timestamp is None:
-        last_full_run_timestamp = previous.get("last_full_run_timestamp") if previous else None
-    if last_piggyback_refresh_timestamp is None:
-        last_piggyback_refresh_timestamp = (
-            previous.get("last_piggyback_refresh_timestamp") if previous else None
-        )
-    # Laufzeit: aus dem Lauf dieses Prozesses, sonst (Refresh-Tick) die
-    # zuletzt gespeicherte behalten.
-    if _last_run_duration:
-        last_run_duration = _last_run_duration[0]
-    else:
-        last_run_duration = previous.get("last_run_duration_seconds") if previous else None
-    payload = {
-        "generated_at": time.time(),
-        "last_run_duration_seconds": last_run_duration,
-        "last_full_run_timestamp": last_full_run_timestamp,
-        "last_piggyback_refresh_timestamp": last_piggyback_refresh_timestamp,
-        "results": [r._asdict() for r in results],
-    }
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp_path = f"{path}.tmp.{os.getpid()}"
-        with open(tmp_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle)
-        os.replace(tmp_path, path)  # atomarer Rename, robust gg. Worker-Races
-    except OSError:
-        pass  # Caching ist best-effort, darf die Seite nie zum Absturz bringen.
+    """Persistiert das Ergebnis (JSON-Datei, gemeinsam fuer alle Apache-
+    Worker). Laufzeit: aus dem Lauf dieses Prozesses, sonst bleibt die
+    zuletzt gespeicherte erhalten."""
+    _rs.save_results(
+        [r._asdict() for r in results],
+        last_full_run_timestamp=last_full_run_timestamp,
+        last_piggyback_refresh_timestamp=last_piggyback_refresh_timestamp,
+        last_run_duration_seconds=_last_run_duration[0] if _last_run_duration else None,
+    )
 
 
 def _load_cache_raw() -> dict[str, Any] | None:
-    """Rohes JSON-Objekt aus der Cache-Datei, ungeparst (Ausbaustufe
-    2.0.0: gebraucht von _save_cached_results() zum Erhalten der beiden
-    Piggyback-Zeitstempel sowie von den Piggyback-Funktionen unten, die
-    zusaetzlich zu den _HostResult-Feldern auch last_full_run_timestamp/
-    last_piggyback_refresh_timestamp lesen muessen)."""
-    path = _cache_path()
-    if not path or not os.path.exists(path):
-        return None
-    try:
-        with open(path, encoding="utf-8") as handle:
-            return json.load(handle)
-    except (OSError, ValueError):
-        return None
+    return _rs.load_cache_raw()
 
 
 def _cached_run_duration() -> float | None:
+    """Dauer des letzten erfolgreichen Laufs: bevorzugt die Gesamtdauer des
+    Hintergrund-Laufs (inkl. Hochfahren der GUI), sonst die in der Cache-
+    Datei gespeicherte reine Analysezeit."""
+    job = _rs.load_job_state()
+    started, finished = job.get("started"), job.get("finished")
+    if job.get("state") == "done" and isinstance(started, (int, float)) and isinstance(finished, (int, float)):
+        return max(0.0, float(finished) - float(started))
     payload = _load_cache_raw() or {}
     value = payload.get("last_run_duration_seconds")
     return float(value) if isinstance(value, (int, float)) else None
@@ -1737,163 +1681,29 @@ def _load_cached_results() -> tuple[float, Sequence[_HostResult]] | None:
     payload = _load_cache_raw()
     if payload is None:
         return None
+    fields = set(_HostResult._fields)
     try:
-        results = [_HostResult(**row) for row in payload["results"]]
+        # Unbekannte Felder (z.B. aus einer neueren Version) ignorieren
+        results = [
+            _HostResult(**{k: v for k, v in row.items() if k in fields})
+            for row in payload["results"]
+        ]
         return float(payload["generated_at"]), results
     except (KeyError, TypeError):
         return None
 
 
-# ---------------------------------------------------------------------------
-# Ausbaustufe 2.0.0: Pro-Host-Piggyback-Erzeugung.
-# ---------------------------------------------------------------------------
-
-
-def _build_piggyback_payload(
-    result: _HostResult,
-    *,
-    last_full_run_timestamp: float,
-    last_piggyback_refresh_timestamp: float,
-) -> bytes:
-    """Baut das JSON-Payload fuer die Piggyback-Section
-    "checkmk_monitoring_coverage" eines einzelnen Hosts (sep(0), reine
-    JSON-Zeile - analog zum Section-Aufbau des Referenzprojekts
-    monitoring_coverage, dort aber NICHT importiert, nur strukturell
-    nachgebaut). Enthaelt bewusst BEIDE Zeitstempel (Plan-Entscheidung
-    11), damit das Check-Plugin sie unabhaengig von der Cache-Datei der
-    GUI-Seite direkt aus der Piggyback-Section herauslesen kann.
-    """
-    payload = {
-        "host_name": result.host_name,
-        "status": result.status,
-        "coverage_pct": result.coverage_pct,
-        "fraction_text": result.fraction_text,
-        "findings": result.findings,
-        "detail_lines": list(result.detail_lines),
-        "capability_summary": result.capability_summary,
-        # 0.9.0-b21: ungefilterte Items + Quellen - das Check-Plugin wertet
-        # sie mit der Setup-Regel des Hosts aus (status/findings oben sind
-        # nur der Stand ohne Regel, fuer aeltere Check-Plugins).
-        "items": list(result.items),
-        "source_lines": list(result.source_lines),
-        "last_full_run_timestamp": last_full_run_timestamp,
-        "last_piggyback_refresh_timestamp": last_piggyback_refresh_timestamp,
-    }
-    line = json.dumps(payload, ensure_ascii=False)
-    return line.encode("utf-8") + b"\n"
-
-
-def _write_piggyback_data(
-    results: Sequence[_HostResult],
-    *,
-    last_full_run_timestamp: float,
-    last_piggyback_refresh_timestamp: float,
-) -> tuple[int, str | None]:
-    """Schreibt fuer jeden Host aus 'results' die Piggyback-Rohdaten via
-    der offiziellen API cmk.piggyback.backend.store_piggyback_raw_data()
-    (Plan-Entscheidung 3 - KEIN rohes Dateisystem-Schreiben). source_
-    hostname ist IMMER PIGGYBACK_SOURCE_HOSTNAME ("monitoring_coverage_
-    analyzer", Plan-Entscheidung 4) - store_piggyback_raw_data() isoliert
-    Piggyback-Daten pro source_hostname, andere Piggyback-Quellen auf
-    denselben Zielhosts werden also durch diesen Aufruf nicht beruehrt
-    (Plan-Entscheidung 13).
-
-    Rueckgabe: (Anzahl erfolgreich geschriebener Hosts, Fehlertext oder
-    None). Best-effort: ein einzelner kaputter Host bricht nicht den
-    gesamten Lauf ab (siehe try/except je Host).
-    """
-    if _store_piggyback_raw_data is None:
-        return 0, (
-            "cmk.piggyback.backend.store_piggyback_raw_data konnte nicht "
-            "importiert werden - Piggyback-Erzeugung ist auf dieser "
-            "Checkmk-Version nicht verfuegbar (Import-Pfad hat sich "
-            "vermutlich geaendert)."
-        )
-    omd_root = os.environ.get("OMD_ROOT", "")
-    if not omd_root:
-        return 0, "OMD_ROOT ist nicht gesetzt - Piggyback-Erzeugung uebersprungen."
-
-    from pathlib import Path as _Path
-
-    message_timestamp = time.time()
-    written = 0
-    last_error: str | None = None
-    for result in results:
-        if not _SAFE_HOST_RE.match(result.host_name):
-            continue
-        section_line = _build_piggyback_payload(
-            result,
-            last_full_run_timestamp=last_full_run_timestamp,
-            last_piggyback_refresh_timestamp=last_piggyback_refresh_timestamp,
-        )
-        # sep(0)-Konvention: Section-Header <<<name:sep(0)>>> gefolgt von
-        # genau einer Zeile JSON (sep(0) bedeutet "kein Feldtrenner
-        # noetig", die komplette Zeile ist ein einzelnes Feld) - identisch
-        # zur Section-Konvention, die auch das Referenz-Check-Plugin fuer
-        # JSON-Payloads verwendet (agent_section_monitoring_coverage_
-        # serverinfo im Referenzprojekt, dort AgentSection ohne
-        # separator=... Parameter = Standard sep(0)).
-        raw = (
-            f"<<<{PIGGYBACK_SECTION_NAME}:sep(0)>>>\n".encode("utf-8")
-            + section_line
-        )
-        try:
-            _store_piggyback_raw_data(
-                source_hostname=PIGGYBACK_SOURCE_HOSTNAME,
-                piggybacked_raw_data={result.host_name: [raw]},
-                message_timestamp=message_timestamp,
-                contact_timestamp=message_timestamp,
-                omd_root=_Path(omd_root),
-            )
-            written += 1
-        except Exception as exc:  # pragma: no cover - defensiv, PoC/GUI-Kontext
-            last_error = f"{result.host_name}: {exc!r}"
-    return written, last_error
-
-
-def _remove_stale_piggyback(results: Sequence[_HostResult]) -> list[str]:
-    """0.9.0-b22: entfernt die Piggyback-Dateien dieser Quelle fuer Hosts,
-    die nicht mehr analysiert werden (z.B. nach Aenderung der Host-
-    Auswahl) - sonst bliebe dort ein veraltetes Ergebnis liegen. Die
-    Piggyback-API hat dafuer keine Funktion (cleanup_piggyback_files()
-    raeumt nur nach Alter auf); betroffen ist ausschliesslich die Datei
-    <piggyback>/<host>/monitoring_coverage_analyzer."""
-    omd_root = os.environ.get("OMD_ROOT", "")
-    if not omd_root:
-        return []
-    base = os.path.join(omd_root, "tmp", "check_mk", "piggyback")
-    current = {r.host_name for r in results}
-    removed: list[str] = []
-    try:
-        hosts = os.listdir(base)
-    except OSError:
-        return []
-    for host_name in hosts:
-        if host_name in current or not _SAFE_HOST_RE.match(host_name):
-            continue
-        path = os.path.join(base, host_name, PIGGYBACK_SOURCE_HOSTNAME)
-        try:
-            os.remove(path)
-            removed.append(host_name)
-        except FileNotFoundError:
-            continue
-        except OSError:
-            continue
-    return removed
-
-
 def _run_piggyback_full(results: Sequence[_HostResult]) -> tuple[int, str | None, float]:
-    """Voller Piggyback-Schreib-Lauf mit NEUEM Inhalt: wird direkt nach
-    einem echten Full-Run aufgerufen (frisch berechnete 'results'). Setzt
-    BEIDE Zeitstempel auf 'jetzt' und persistiert sie im Cache.
-    """
+    """Piggyback-Daten mit NEUEM Inhalt direkt nach einem Analyse-Lauf:
+    beide Zeitstempel auf 'jetzt', Ergebnis in die Cache-Datei."""
     now = time.time()
-    written, error = _write_piggyback_data(
-        results,
+    rows = [r._asdict() for r in results]
+    written, error = _rs.write_piggyback(
+        rows,
         last_full_run_timestamp=now,
         last_piggyback_refresh_timestamp=now,
     )
-    _remove_stale_piggyback(results)
+    _rs.remove_stale_piggyback(rows)
     _save_cached_results(
         results,
         last_full_run_timestamp=now,
@@ -1903,42 +1713,20 @@ def _run_piggyback_full(results: Sequence[_HostResult]) -> tuple[int, str | None
 
 
 def _run_piggyback_refresh() -> tuple[int, str | None]:
-    """Reiner Refresh-Tick (Plan-Entscheidung 7/11): schreibt den ZULETZT
-    GECACHTEN Inhalt (keine neue Livestatus-Query!) mit einem NEUEN
-    message_timestamp erneut per store_piggyback_raw_data(). Nur
-    "last_piggyback_refresh_timestamp" aendert sich dabei -
-    "last_full_run_timestamp" bleibt unveraendert (zentrale
-    Korrektheitsbedingung des Features, siehe Plan-Entscheidung 11/
-    Deliverable 6).
+    return _rs.run_piggyback_refresh()
 
-    Gibt (0, Fehlertext) zurueck, wenn noch kein Cache existiert (z.B.
-    unmittelbar nach Installation, bevor der erste Full-Run gelaufen
-    ist) - ein Refresh-Tick kann ohne vorherigen Full-Run keinen Inhalt
-    haben.
-    """
-    payload = _load_cache_raw()
-    if payload is None:
-        return 0, "Kein Cache vorhanden - noch kein Full-Run gelaufen."
-    try:
-        results = [_HostResult(**row) for row in payload["results"]]
-        last_full_run_timestamp = float(payload["last_full_run_timestamp"])
-    except (KeyError, TypeError, ValueError):
-        return 0, "Cache-Datei enthaelt keinen gueltigen Full-Run-Zeitstempel."
 
-    now = time.time()
-    written, error = _write_piggyback_data(
-        results,
-        last_full_run_timestamp=last_full_run_timestamp,
-        last_piggyback_refresh_timestamp=now,
-    )
-    # last_full_run_timestamp bewusst UNVERAENDERT weiterreichen - nur der
-    # Refresh-Zeitstempel wird aktualisiert (siehe Docstring oben).
-    _save_cached_results(
-        results,
-        last_full_run_timestamp=last_full_run_timestamp,
-        last_piggyback_refresh_timestamp=now,
-    )
-    return written, error
+def _run_analysis_and_store() -> tuple[int, int, str | None]:
+    """Kompletter Analyse-Lauf inkl. Speichern (und Piggyback, falls
+    aktiviert). Wird vom Cron-Skript aufgerufen (fullrun/rerun), nicht mehr
+    aus dem Apache-Request. Rueckgabe: (Hosts, Piggyback geschrieben,
+    Fehler)."""
+    results = _query_and_analyze_hosts()
+    if _generate_piggyback_data_enabled():
+        written, error, _now = _run_piggyback_full(results)
+        return len(results), written, error
+    _save_cached_results(results, last_full_run_timestamp=time.time())
+    return len(results), 0, None
 
 
 def _perfometer_style(coverage_pct: int) -> str:
@@ -2003,62 +1791,15 @@ def _host_link(host_name: str) -> HTML:
 
 
 def _generate_piggyback_data_enabled() -> bool:
-    """Liest die globale Option 'generate_piggyback_data' (Default True,
-    siehe plugins/config/monitoring_coverage_analyzer.py). Bewusst
-    defensiv per getattr(): falls active_config aus irgendeinem Grund
-    (z.B. Aufruf ausserhalb eines GUI-Requests) die Variable nicht
-    kennt, wird der dokumentierte Default (True) angenommen statt eines
-    AttributeError.
-    """
-    try:
-        from cmk.gui.config import active_config
-        return bool(getattr(active_config, "generate_piggyback_data", True))
-    except Exception:  # pragma: no cover - defensiv
-        return True
+    return _rs.generate_piggyback_data_enabled()
 
 
 def _piggyback_interval_hours() -> int:
-    """Liest die globale Option 'piggyback_interval_hours' (Default 24,
-    siehe plugins/config/monitoring_coverage_analyzer.py)."""
-    try:
-        from cmk.gui.config import active_config
-        return int(getattr(active_config, "piggyback_interval_hours", 24))
-    except Exception:  # pragma: no cover - defensiv
-        return 24
-
-
-# 0.9.0-b12: der fullrun-Cron laeuft nur noch EINMAL taeglich (05:00).
-# last_full_run_timestamp wird erst am ENDE eines Laufs gesetzt (z.B.
-# 05:00:10) - ohne Toleranz waere der Lauf am Folgetag um 05:00:00 mit
-# "age < 24h" nicht faellig und es gaebe nur noch jeden 2. Tag einen
-# Full-Run. Die Toleranz muss groesser als die Laufzeit eines Full-Runs
-# und kleiner als der Cron-Abstand (24 h) sein.
-_FULL_RUN_DUE_GRACE_SECONDS = 3600
+    return _rs.piggyback_interval_hours()
 
 
 def _is_full_run_due(*, force: bool) -> tuple[bool, str]:
-    """Prueft, ob ein neuer ECHTER Full-Run faellig ist: entweder 'force'
-    ist gesetzt (manueller Re-Run-Knopf, oder ?_cron_fullrun=1&_force=1),
-    oder seit dem letzten last_full_run_timestamp im Cache ist mehr Zeit
-    vergangen als piggyback_interval_hours minus
-    _FULL_RUN_DUE_GRACE_SECONDS (Plan-Entscheidung 8). Kein Cache
-    vorhanden -> immer faellig (Erstlauf).
-    """
-    if force:
-        return True, "forced"
-    payload = _load_cache_raw()
-    if payload is None:
-        return True, "no cache yet"
-    try:
-        last = float(payload["last_full_run_timestamp"])
-    except (KeyError, TypeError, ValueError):
-        return True, "no last_full_run_timestamp in cache"
-    interval_seconds = _piggyback_interval_hours() * 3600
-    threshold = max(0, interval_seconds - _FULL_RUN_DUE_GRACE_SECONDS)
-    age = time.time() - last
-    if age >= threshold:
-        return True, f"age {age:.0f}s >= interval {interval_seconds}s - grace {_FULL_RUN_DUE_GRACE_SECONDS}s"
-    return False, f"age {age:.0f}s < interval {interval_seconds}s - grace {_FULL_RUN_DUE_GRACE_SECONDS}s"
+    return _rs.is_full_run_due(force=force)
 
 
 # 0.9.0-b21: Setup-Regel "Monitoring coverage analysis" (rulesets/
@@ -2166,16 +1907,10 @@ class PageMonitoringCoverageAnalyzer(Page):
             if not due:
                 html.write_text(f"SKIP fullrun not due ({reason})\n")
                 return None
-            results = _query_and_analyze_hosts()
-            written = 0
-            error: str | None = None
-            if _generate_piggyback_data_enabled():
-                written, error, _now = _run_piggyback_full(results)
-            else:
-                _save_cached_results(results, last_full_run_timestamp=time.time())
+            # 0.9.0-b25: auch hier im Hintergrund, nicht im Apache-Request
+            started, message = _rs.start_background_rerun()
             html.write_text(
-                f"OK fullrun hosts={len(results)} piggyback_written={written} "
-                f"error={error}\n"
+                f"{'OK' if started else 'SKIP'} fullrun {message}\n"
             )
             return None
 
@@ -2197,9 +1932,11 @@ class PageMonitoringCoverageAnalyzer(Page):
                 "this site ('cmk -L'), host labels, installed packages "
                 "from the Checkmk HW/SW inventory, AND agent plug-ins "
                 "actually delivered by the agent (agent_section proxy). "
-                "The result is cached on disk and only refreshed when you "
-                "click 'Re-run analysis' below (or on first visit, if no "
-                "cached result exists yet). Click the arrow before a "
+                "The result is cached on disk and refreshed by the daily "
+                "full run or when you click 'Re-run analysis' below. The "
+                "analysis runs in the background, outside the web server; "
+                "the page reloads automatically until it has finished. "
+                "Click the arrow before a "
                 "hostname to expand the per-subsystem detail, analogous "
                 "to the long output of the 'Checkmk Monitoring Coverage' "
                 "service."
@@ -2214,15 +1951,62 @@ class PageMonitoringCoverageAnalyzer(Page):
         html.open_span(class_="mca_spinner")
         html.close_span()
         html.write_text(
-            _("Analysis running - querying all hosts, this can take a while ...")
+            _("Starting analysis ...")
         )
         html.close_span()
         html.hidden_fields()
         html.end_form()
 
-        force_rerun = ctx.request.has_var("_analyze")
-        self._show_results(force_rerun=force_rerun)
+        # 0.9.0-b25: "Re-run analysis" startet die Analyse als eigenen
+        # Prozess ausserhalb von Apache (Cron-Skript, Modus "rerun") - bei
+        # vielen Hosts oder langsamen Systemen dauert sie laenger als der
+        # Apache-Timeout. Die Seite zeigt den Fortschritt und laedt sich
+        # neu, bis der Lauf fertig ist.
+        start_message = None
+        # Noch kein Ergebnis (Erstbesuch) -> wie ein Klick auf Re-run
+        if ctx.request.has_var("_analyze") or _load_cache_raw() is None:
+            started, message = _rs.start_background_rerun()
+            if not started and message != "already running":
+                start_message = _("Could not start the analysis: %s") % message
+        self._show_job_status(start_message)
+        self._show_results()
         return None
+
+    def _show_job_status(self, start_message: str | None) -> None:
+        status = _rs.job_status()
+        state = status.get("state")
+        last = _cached_run_duration()
+        if start_message:
+            html.show_error(start_message)
+        if state == "running":
+            started = status.get("started") or status.get("requested")
+            since = (
+                time.strftime("%H:%M:%S", time.localtime(float(started)))
+                if isinstance(started, (int, float)) else "?"
+            )
+            text = _("Analysis running since %s") % since
+            if last is not None:
+                text += " - " + _("last run took %s") % _format_duration(last)
+            text += " - " + _("this page reloads automatically.")
+            html.open_div(class_="info", style="margin:8px 0")
+            html.open_span(class_="mca_spinner")
+            html.close_span()
+            html.write_text(text)
+            html.close_div()
+            # Neu laden OHNE _analyze (sonst wuerde ein neuer Lauf gestartet)
+            url = makeuri_contextless(request, [], filename="monitoring_coverage_analyzer.py")
+            html.javascript(f"setTimeout(function(){{window.location.href={json.dumps(url)};}}, 5000);")
+        elif state == "failed":
+            # Bei abgebrochenem Prozess gibt es kein Ende -> Startzeit
+            when_ts = status.get("finished") or status.get("started") or status.get("requested")
+            when = (
+                time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(when_ts)))
+                if isinstance(when_ts, (int, float)) else "?"
+            )
+            html.show_error(
+                _("Last analysis run failed (%s): %s - the result below is from an earlier run.")
+                % (when, status.get("error") or _("unknown error"))
+            )
 
     def _show_summary(self, results: Sequence[_HostResult]) -> None:
         """Gesamt-Coverage ueber alle Hosts: Summe der ueberwachten durch
@@ -2253,25 +2037,14 @@ class PageMonitoringCoverageAnalyzer(Page):
         html.close_tr()
         html.close_table()
 
-    def _show_results(self, force_rerun: bool) -> None:
-        cached = None if force_rerun else _load_cached_results()
-        if cached is not None:
-            generated_at, results = cached
-        else:
-            # Schritt 2: kein Cache vorhanden (Erstbesuch) ODER
-            # Re-Run-Button gedrueckt -> Analyse einmal ausfuehren und
-            # das Ergebnis fuer alle Worker-Prozesse persistieren.
-            results = _query_and_analyze_hosts()
-            # Ausbaustufe 2.0.0: der 'Re-run analysis'-Knopf loest bei
-            # aktivierter Piggyback-Option (Default an) zusaetzlich sofort
-            # den vollen Piggyback-Full-Write aus (neuer Inhalt + beide
-            # Zeitstempel neu, siehe Plan-Entscheidung 12), statt nur die
-            # GUI-Cache-Datei zu aktualisieren.
-            if _generate_piggyback_data_enabled():
-                _run_piggyback_full(results)
-            else:
-                _save_cached_results(results, last_full_run_timestamp=time.time())
-            generated_at = time.time()
+    def _show_results(self) -> None:
+        cached = _load_cached_results()
+        if cached is None:
+            # Erstbesuch: der Lauf wurde in page() gestartet, der Status
+            # oben zeigt den Fortschritt und laedt die Seite neu.
+            html.p(_("No analysis result yet - the first analysis run has been started."))
+            return
+        generated_at, results = cached
 
         lookup = _RuleLookup()
         results = _apply_rules(results, lookup)
