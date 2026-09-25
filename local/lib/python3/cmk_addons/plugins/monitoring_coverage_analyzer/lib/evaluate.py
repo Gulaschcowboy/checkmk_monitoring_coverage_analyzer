@@ -153,6 +153,9 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
     candidate_lines = [_item_line(i) for i in by_title(candidates)]
     monitored_lines = [
         "%s: monitored (via %s)" % (i.get("title", ""), ", ".join(i.get("plugins") or []))
+        if i.get("state", "monitored") == "monitored"
+        # z.B. "plug-in deployed, all services disabled by rule (12)"
+        else "%s: %s" % (i.get("title", ""), i.get("state", ""))
         for i in by_title(monitored)
     ]
 

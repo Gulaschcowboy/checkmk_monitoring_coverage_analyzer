@@ -1184,6 +1184,7 @@ def _analyze_host(
     agent_sections: _AgentSections | None = None,
     generic_found: Mapping[str, list[str]] | None = None,
     generic_catalog: Mapping[str, _GenericFamily] | None = None,
+    discovery: Mapping[str, _DiscoveryCounts] | None = None,
 ) -> _HostResult:
     """Coverage-Korrelation fuer einen einzelnen Host (Stand 0.9.0-b14).
 
@@ -1334,6 +1335,20 @@ def _analyze_host(
                 "plugins": list(s.via), "evidence": list(s.evidence), "state": "monitored",
             })
             continue
+        if s.kind in ("delivered", "deployed") and discovery:
+            # 0.9.0-b23: Plug-in liefert Daten, und ueber ALLE Services der
+            # Plugins dieses Subsystems wurde entschieden (mind. einer per
+            # Regel deaktiviert, keiner offen) -> bewusst so gewollt, zaehlt
+            # als abgedeckt.
+            ignored_n = sum(discovery[p].ignored for p in s.via if p in discovery)
+            undecided_n = sum(discovery[p].unmonitored for p in s.via if p in discovery)
+            if ignored_n and not undecided_n:
+                items.append({
+                    "kind": "monitored", "token": s.token, "title": s.title,
+                    "plugins": list(s.via), "evidence": list(s.evidence),
+                    "state": _("plug-in deployed, all services disabled by rule (%d)") % ignored_n,
+                })
+                continue
         state_txt = {
             "delivered": _("agent delivers data, not monitored"),
             "deployed": _("agent plug-in deployed, not monitored"),
@@ -1444,6 +1459,53 @@ def _build_result(
     )
 
 
+# 0.9.0-b23: Entscheidungen des Anwenders aus dem "Check_MK Discovery"-
+# Service (Long Output): "Service ignored: <plugin>: <item>" = per Regel
+# deaktiviert, "Service unmonitored: <plugin>: <item>" = noch nicht
+# entschieden. Dient NICHT zur Erkennung von Subsystemen, nur dazu, ein
+# "agent delivers data"-Finding als bewusst entschieden zu erkennen.
+_DISCOVERY_LINE_RE = re.compile(r"^Service (ignored|unmonitored): ([^:\s]+): ")
+
+
+class _DiscoveryCounts(NamedTuple):
+    ignored: int
+    unmonitored: int
+
+
+def _parse_discovery_output(long_output: str) -> dict[str, _DiscoveryCounts]:
+    """Long Output des Discovery-Service -> Plugin -> Anzahl ignorierter /
+    unentschiedener Services. Livestatus liefert Zeilenumbrueche als '\\n'."""
+    ignored: dict[str, int] = {}
+    unmonitored: dict[str, int] = {}
+    for line in long_output.replace("\\n", "\n").splitlines():
+        match = _DISCOVERY_LINE_RE.match(line.strip())
+        if not match:
+            continue
+        target = ignored if match.group(1) == "ignored" else unmonitored
+        target[match.group(2)] = target.get(match.group(2), 0) + 1
+    return {
+        plugin: _DiscoveryCounts(ignored.get(plugin, 0), unmonitored.get(plugin, 0))
+        for plugin in set(ignored) | set(unmonitored)
+    }
+
+
+def _discovery_states(connection: Any) -> dict[str, dict[str, _DiscoveryCounts]]:
+    """Host -> Plugin -> _DiscoveryCounts, eine Livestatus-Query pro Lauf."""
+    try:
+        rows = connection.query(
+            "GET services\n"
+            "Columns: host_name long_plugin_output\n"
+            "Filter: check_command = check-mk-inventory\n"
+        )
+    except Exception:  # pragma: no cover - defensiv, GUI-Kontext
+        return {}
+    return {
+        host_name: _parse_discovery_output(long_output or "")
+        for host_name, long_output in rows
+        if isinstance(long_output, str)
+    }
+
+
 # 0.9.0-b22: Betriebssysteme, deren Hosts analysiert werden.
 _AGENT_OS_TYPES = frozenset({"linux", "windows", "freebsd", "solaris", "aix"})
 
@@ -1504,6 +1566,7 @@ def _query_and_analyze_hosts() -> Sequence[_HostResult]:
 
     # "cmk -L" GENAU EINMAL fuer den gesamten Analyse-Lauf, nicht pro Host.
     available_map = _available_plugin_map()
+    discovery_by_host = _discovery_states(connection)
 
     agent_rows: list[tuple[str, dict[str, str]]] = []
     for host_name, tags, labels in rows:
@@ -1549,6 +1612,7 @@ def _query_and_analyze_hosts() -> Sequence[_HostResult]:
             agent_sections=sections_by_host.get(host_name),
             generic_found=generic_by_host.get(host_name),
             generic_catalog=catalog,
+            discovery=discovery_by_host.get(host_name),
         )
         results.append(result)
 

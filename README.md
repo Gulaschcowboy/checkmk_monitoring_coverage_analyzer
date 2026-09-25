@@ -52,6 +52,12 @@ Hosts are analyzed if they are monitored via the Checkmk agent (TCP) and
 report a supported operating system (`cmk/os_type`, or `cmk/os_family` for
 older agents): linux, windows, freebsd, solaris, aix.
 
+If an agent plug-in delivers data but none of its services is monitored,
+and the "Check_MK Discovery" service lists all of them as disabled by rule
+("Service ignored") with none left undecided, the subsystem counts as
+covered: the plug-in is deployed and every service was decided on
+deliberately.
+
 A subsystem is reported only if the site has a matching check plug-in
 (`cmk -L`). Rules may exclude operating systems where a plug-in cannot
 run (`not_on_os`).
