@@ -44,6 +44,9 @@ class Evaluation(NamedTuple):
     candidate_lines: list[str]
     ignored_lines: list[str]
     monitored_lines: list[str]
+    # Zaehler fuer die Gesamt-Coverage ueber alle Hosts (GUI-Seite)
+    monitored_count: int = 0
+    total_count: int = 0
 
 
 def _compile(pattern: object) -> re.Pattern[str] | None:
@@ -180,6 +183,8 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
         candidate_lines=candidate_lines,
         ignored_lines=ignored_lines,
         monitored_lines=monitored_lines,
+        monitored_count=monitored_n,
+        total_count=total,
     )
 
 

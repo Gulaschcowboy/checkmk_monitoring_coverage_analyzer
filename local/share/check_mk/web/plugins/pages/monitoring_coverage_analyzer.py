@@ -1123,6 +1123,9 @@ class _HostResult(NamedTuple):
     items: list[dict[str, Any]] = []
     candidate_lines: list[str] = []
     ignored_lines: list[str] = []
+    # Zaehler fuer die Gesamt-Coverage (nach Anwendung der Setup-Regel)
+    monitored_count: int = 0
+    total_count: int = 0
 
 
 def _monitored_map_for_host(check_commands: Sequence[str]) -> dict[str, list[str]]:
@@ -1456,6 +1459,8 @@ def _build_result(
         items=items,
         candidate_lines=evaluation.candidate_lines,
         ignored_lines=evaluation.ignored_lines,
+        monitored_count=evaluation.monitored_count,
+        total_count=evaluation.total_count,
     )
 
 
@@ -1518,7 +1523,21 @@ def _host_os(labels: Mapping[str, str]) -> str:
     return str(value).strip().lower()
 
 
+# Laufzeit des letzten Analyse-Laufs in diesem Prozess (Sekunden), wird von
+# _save_cached_results() in die Cache-Datei uebernommen.
+_last_run_duration: list[float] = []
+
+
 def _query_and_analyze_hosts() -> Sequence[_HostResult]:
+    """Analyse-Lauf mit Laufzeitmessung, siehe _query_and_analyze_hosts_impl()."""
+    started = time.monotonic()
+    try:
+        return _query_and_analyze_hosts_impl()
+    finally:
+        _last_run_duration[:] = [time.monotonic() - started]
+
+
+def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
     """Ermittelt per Livestatus alle Hosts, die per Checkmk-Agent (TCP)
     ueberwacht werden, und wendet auf jeden Host die Coverage-Korrelation
     aus _analyze_host() an.
@@ -1661,8 +1680,15 @@ def _save_cached_results(
         last_piggyback_refresh_timestamp = (
             previous.get("last_piggyback_refresh_timestamp") if previous else None
         )
+    # Laufzeit: aus dem Lauf dieses Prozesses, sonst (Refresh-Tick) die
+    # zuletzt gespeicherte behalten.
+    if _last_run_duration:
+        last_run_duration = _last_run_duration[0]
+    else:
+        last_run_duration = previous.get("last_run_duration_seconds") if previous else None
     payload = {
         "generated_at": time.time(),
+        "last_run_duration_seconds": last_run_duration,
         "last_full_run_timestamp": last_full_run_timestamp,
         "last_piggyback_refresh_timestamp": last_piggyback_refresh_timestamp,
         "results": [r._asdict() for r in results],
@@ -1691,6 +1717,20 @@ def _load_cache_raw() -> dict[str, Any] | None:
             return json.load(handle)
     except (OSError, ValueError):
         return None
+
+
+def _cached_run_duration() -> float | None:
+    payload = _load_cache_raw() or {}
+    value = payload.get("last_run_duration_seconds")
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return _("unknown (run the analysis again)")
+    if seconds < 60:
+        return f"{seconds:.1f} s"
+    return f"{int(seconds // 60)} min {int(seconds % 60)} s"
 
 
 def _load_cached_results() -> tuple[float, Sequence[_HostResult]] | None:
@@ -2184,6 +2224,35 @@ class PageMonitoringCoverageAnalyzer(Page):
         self._show_results(force_rerun=force_rerun)
         return None
 
+    def _show_summary(self, results: Sequence[_HostResult]) -> None:
+        """Gesamt-Coverage ueber alle Hosts: Summe der ueberwachten durch
+        Summe der ueberwachbaren Subsysteme (nach Setup-Regel) - Hosts mit
+        vielen Subsystemen zaehlen also staerker als ein Mittelwert der
+        Host-Prozente."""
+        if not results:
+            return
+        monitored = sum(r.monitored_count for r in results)
+        total = sum(r.total_count for r in results)
+        states: dict[str, int] = {}
+        for r in results:
+            states[r.status] = states.get(r.status, 0) + 1
+        pct = 100 if total == 0 else round(100 * monitored / total)
+        html.open_table(class_=("data",), style="margin-bottom:10px")
+        html.open_tr()
+        html.td(_("Overall coverage"), style="font-weight:bold; padding-right:12px")
+        html.open_td(style=_perfometer_style(pct) + " min-width:120px")
+        html.write_text(f"{pct}%")
+        html.close_td()
+        html.td(
+            _("%d/%d monitorable subsystems monitored on %d hosts") % (monitored, total, len(results))
+            + " (" + ", ".join(
+                f"{states[s]} {s}" for s in ("OK", "WARN", "CRIT", "UNKNOWN") if states.get(s)
+            ) + ")",
+            style="padding-left:12px",
+        )
+        html.close_tr()
+        html.close_table()
+
     def _show_results(self, force_rerun: bool) -> None:
         cached = None if force_rerun else _load_cached_results()
         if cached is not None:
@@ -2208,8 +2277,12 @@ class PageMonitoringCoverageAnalyzer(Page):
         results = _apply_rules(results, lookup)
 
         html.h3(_("Analysis result"))
+        self._show_summary(results)
         age_txt = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(generated_at))
-        html.p(_("Result from: %s (cached until next re-run)") % age_txt)
+        html.p(
+            _("Result from: %s (cached until next re-run), analysis run took %s")
+            % (age_txt, _format_duration(_cached_run_duration()))
+        )
         html.p(_("Findings/hints rules source: %s") % _rules_source_status())
         rules_txt = _("Setup rule 'Monitoring coverage analysis': %d rule(s)") % lookup.rule_count
         if lookup.error:

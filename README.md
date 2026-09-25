@@ -10,7 +10,8 @@ so no additional agent queries are made).
 ## Components
 
 - **GUI page** "Setup > Maintenance > Analyze monitoring coverage":
-  site-wide table with coverage per host, findings, already monitored
+  overall coverage across all hosts, duration of the last analysis run,
+  and a table with coverage per host, findings, already monitored
   subsystems and evidence sources. "Re-run analysis" recomputes on demand.
 - **Piggyback service** "Checkmk Monitoring Coverage" per host
   (check plug-in `checkmk_monitoring_coverage`), fed from the cached
