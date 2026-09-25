@@ -65,6 +65,14 @@ and the "Check_MK Discovery" service lists all of them as disabled by rule
 covered: the plug-in is deployed and every service was decided on
 deliberately.
 
+For plug-ins listed in `empty_ok` in the rules file (default:
+`windows_tasks`), a deployed plug-in whose section arrives empty also
+counts as covered: there is nothing to monitor on that host. A deployed
+plug-in that only delivers piggyback data for other hosts counts as
+covered if its services are monitored on all of those hosts. For all
+other plug-ins, "deployed but no data" stays a finding with the hint to
+check the plug-in.
+
 A subsystem is reported only if the site has a matching check plug-in
 (`cmk -L`). Rules may exclude operating systems where a plug-in cannot
 run (`not_on_os`).

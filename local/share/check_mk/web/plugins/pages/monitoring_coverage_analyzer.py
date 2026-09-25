@@ -227,6 +227,10 @@ class _Rules(NamedTuple):
     # 0.9.0-b21: Plug-in-Familien, die der generische Abgleich nie
     # vorschlaegt (zu allgemeine Namen wie "local", "win", "job").
     generic_ignore_families: frozenset[str] = frozenset()
+    # 0.9.0-b26: Sections, bei denen "Header da, keine Daten" ein gueltiger
+    # Zustand ist (z.B. windows_tasks ohne passende Tasks) - siehe
+    # _analyze_host().
+    empty_ok: frozenset[str] = frozenset()
 
 
 class RulesLoadError(RuntimeError):
@@ -358,6 +362,7 @@ def _load_rules() -> _Rules:
     generic_ignore_families = frozenset(
         str(x).lower() for x in data.get("generic_ignore_families") or []
     )
+    empty_ok = frozenset(str(x) for x in data.get("empty_ok") or [])
     for pattern in [*section_data.values(), *no_data_lines]:
         try:
             re.compile(pattern)
@@ -372,7 +377,7 @@ def _load_rules() -> _Rules:
         )
     return _Rules(
         aliases, titles, hints, stop_tokens, detect, section_data, section_ignore, no_data_lines,
-        generic_ignore_families,
+        generic_ignore_families, empty_ok,
     )
 
 
@@ -391,6 +396,7 @@ SECTION_DATA: dict[str, str] = {}
 SECTION_IGNORE: frozenset[str] = frozenset()
 NO_DATA_LINES: list[str] = []
 GENERIC_IGNORE_FAMILIES: frozenset[str] = frozenset()
+EMPTY_OK: frozenset[str] = frozenset()
 
 
 def _reload_rules() -> None:
@@ -406,8 +412,9 @@ def _reload_rules() -> None:
     TITLES.update(rules.titles)
     HINTS.clear()
     HINTS.update(rules.hints)
-    global STOP_TOKENS, SECTION_IGNORE, GENERIC_IGNORE_FAMILIES
+    global STOP_TOKENS, SECTION_IGNORE, GENERIC_IGNORE_FAMILIES, EMPTY_OK
     STOP_TOKENS = rules.stop_tokens
+    EMPTY_OK = rules.empty_ok
     GENERIC_IGNORE_FAMILIES = rules.generic_ignore_families
     DETECT.clear()
     DETECT.update(rules.detect)
@@ -606,6 +613,34 @@ class _AgentSections(NamedTuple):
     sections: dict[str, list[str]]
     source: str
     error: str | None
+    # 0.9.0-b26: Sections in Piggyback-Bloecken fuer ANDERE Hosts:
+    # section_name -> Ziel-Hosts. Kein Beleg fuer diesen Host, aber der
+    # Nachweis, dass ein hier verteiltes Plug-in Daten liefert (z.B.
+    # oxidized: nur Piggyback-Daten fuer die gesicherten Geraete).
+    piggyback: Mapping[str, frozenset[str]] = {}
+
+
+def _parse_piggyback_sections(raw_text: str) -> dict[str, frozenset[str]]:
+    """Sections in Piggyback-Bloecken fuer ANDERE Hosts, je Section die
+    Ziel-Hosts (nur Sections mit mindestens einer Datenzeile)."""
+    found: dict[str, set[str]] = {}
+    target: str | None = None
+    current: str | None = None
+    for line in raw_text.splitlines():
+        pb_match = _PIGGYBACK_MARKER_RE.match(line)
+        if pb_match:
+            target = pb_match.group(1).strip() or None
+            current = None
+            continue
+        if target is None:
+            continue
+        match = _RAW_CACHE_SECTION_RE.match(line)
+        if match:
+            current = match.group(1)
+            continue
+        if current is not None and line.strip():
+            found.setdefault(current, set()).add(target)
+    return {name: frozenset(hosts) for name, hosts in found.items()}
 
 
 def _parse_agent_sections(raw_text: str) -> dict[str, list[str]]:
@@ -670,7 +705,10 @@ def _automation_agent_sections(host_name: str) -> _AgentSections:
 
     raw_text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
     error = None if success else (str(details).strip() or "fetch failed")
-    return _AgentSections(_parse_agent_sections(raw_text), SRC_AUTOMATION, error)
+    return _AgentSections(
+        _parse_agent_sections(raw_text), SRC_AUTOMATION, error,
+        _parse_piggyback_sections(raw_text),
+    )
 
 
 def _agent_sections(host_name: str) -> _AgentSections:
@@ -1174,6 +1212,7 @@ def _analyze_host(
     generic_found: Mapping[str, list[str]] | None = None,
     generic_catalog: Mapping[str, _GenericFamily] | None = None,
     discovery: Mapping[str, _DiscoveryCounts] | None = None,
+    check_commands_by_host: Mapping[str, Sequence[str]] | None = None,
 ) -> _HostResult:
     """Coverage-Korrelation fuer einen einzelnen Host (Stand 0.9.0-b14).
 
@@ -1324,6 +1363,67 @@ def _analyze_host(
                 "plugins": list(s.via), "evidence": list(s.evidence), "state": "monitored",
             })
             continue
+        if s.kind == "deployed" and agent_sections is not None and agent_sections.piggyback:
+            # 0.9.0-b26: Plug-in verteilt, liefert aber nur Piggyback-Daten
+            # fuer andere Hosts (z.B. oxidized). Abgedeckt, wenn das Plugin
+            # auf allen Ziel-Hosts ueberwacht wird.
+            targets = sorted({
+                t for name, hosts in agent_sections.piggyback.items()
+                if _canonical_token(name) == s.token for t in hosts
+            })
+            if targets:
+                commands = check_commands_by_host or {}
+                by_lower = {h.lower(): h for h in commands}
+                monitored_on = [
+                    t for t in targets
+                    if s.token in _monitored_map_for_host(commands.get(by_lower.get(t.lower(), t), []))
+                ]
+                missing = [t for t in targets if t not in monitored_on]
+                pb_evidence = [*s.evidence, "piggyback data for: " + ", ".join(targets)]
+                if not missing:
+                    items.append({
+                        "kind": "monitored", "token": s.token, "title": s.title,
+                        "plugins": list(s.via), "evidence": pb_evidence,
+                        "state": _("plug-in delivers piggyback data for %d host(s), monitored there (%d/%d)")
+                        % (len(targets), len(monitored_on), len(targets)),
+                    })
+                    continue
+                # Ziel-Host ohne jeden Service = in Checkmk nicht angelegt
+                unknown = [t for t in missing if t.lower() not in by_lower]
+                undiscovered = [t for t in missing if t.lower() in by_lower]
+                hints = []
+                if undiscovered:
+                    hints.append(_("Run service discovery on the piggybacked host(s): %s") % ", ".join(undiscovered))
+                if unknown:
+                    hints.append(_("Create the piggybacked host(s) in Checkmk: %s") % ", ".join(unknown))
+                items.append({
+                    "kind": "open", "token": s.token, "title": s.title,
+                    "plugins": list(s.via), "evidence": pb_evidence,
+                    "state": _("plug-in delivers piggyback data for %d host(s), monitored on %d")
+                    % (len(targets), len(monitored_on)),
+                    "hint": " ".join(hints),
+                })
+                continue
+        if s.kind == "deployed":
+            # 0.9.0-b26: Plug-in verteilt, Section-Header kommt an, aber ohne
+            # Daten - fuer Sections aus empty_ok ein gueltiger Zustand (z.B.
+            # windows_tasks: keine Tasks, die der Agent meldet). Das
+            # Plug-in ist verteilt, es gibt nichts zu ueberwachen.
+            empty = sorted(
+                name for name in EMPTY_OK
+                if name in raw_sections
+                and _canonical_token(name) == s.token
+                and not _section_has_data(name, raw_sections[name])
+            )
+            if empty:
+                items.append({
+                    "kind": "monitored", "token": s.token, "title": s.title,
+                    "plugins": list(s.via),
+                    "evidence": [*s.evidence, *(f"section '{n}' is empty" for n in empty)],
+                    "state": _("plug-in deployed, nothing to monitor (section '%s' is empty)")
+                    % "', '".join(empty),
+                })
+                continue
         if s.kind in ("delivered", "deployed") and discovery:
             # 0.9.0-b23: Plug-in liefert Daten, und ueber ALLE Services der
             # Plugins dieses Subsystems wurde entschieden (mind. einer per
@@ -1340,13 +1440,21 @@ def _analyze_host(
                 continue
         state_txt = {
             "delivered": _("agent delivers data, not monitored"),
-            "deployed": _("agent plug-in deployed, not monitored"),
+            "deployed": _("agent plug-in deployed, delivers no data"),
             "running": _("running, not monitored"),
         }.get(s.kind, _("detected, not monitored"))
-        if s.kind in ("delivered", "deployed"):
+        if s.kind == "delivered":
             # Daten sind schon da - ein Plug-in-Deployment-Hinweis waere
             # hier falsch, es fehlt nur die Service-Discovery.
             hint = _("Run service discovery for this host.")
+        elif s.kind == "deployed":
+            # 0.9.0-b26: Plug-in verteilt, liefert aber keine Daten - eine
+            # Discovery wuerde nichts finden, das Plug-in selbst pruefen.
+            hint = _(
+                "The agent plug-in is deployed but delivers no data - check "
+                "the plug-in (configuration, permissions, timeouts), then run "
+                "service discovery."
+            )
         else:
             hint = HINTS.get(s.token, "")
         items.append({
@@ -1618,6 +1726,7 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
             generic_found=generic_by_host.get(host_name),
             generic_catalog=catalog,
             discovery=discovery_by_host.get(host_name),
+            check_commands_by_host=check_commands_by_host,
         )
         results.append(result)
 
