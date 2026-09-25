@@ -185,12 +185,6 @@ _RERUN_ONSUBMIT_JS = (
 )
 
 
-# Anzeige-Reihenfolge/Farbe fuer die Status-Zelle, exakt wie in der
-# normalen Checkmk Service-Tabelle (live nachgeschlagen, siehe
-# lib/python3/cmk/gui/bi/view.py: 'classes = "state svcstate state%s" %
-# state["state"]' - state 0=OK, 1=WARN, 2=CRIT, 3=UNKNOWN).
-_STATUS_TO_STATE_NUM: dict[str, int] = {"OK": 0, "WARN": 1, "CRIT": 2, "UNKNOWN": 3}
-
 # ---------------------------------------------------------------------------
 # Coverage-Wissensbasis (Schritt 1.4.0: rein daten-basiert): die Regeln
 # (Alias-/Titel-/Hinweis-Tabellen, Stop-Tokens) liegen AUSSCHLIESSLICH in
@@ -1983,7 +1977,7 @@ def _run_analysis_and_store() -> tuple[int, int, str | None]:
     return len(results), 0, None
 
 
-def _perfometer_style(coverage_pct: int) -> str:
+def _perfometer_style(coverage_pct: int, status: str | None = None) -> str:
     """Schritt 1c: inline-CSS-Hintergrund analog zum Perf-o-Meter-Stil in
     Checkmk-Views - ein horizontaler linear-gradient-Balken, dessen
     gefuellter Anteil coverage_pct entspricht. Farben 1:1 aus den echten
@@ -1996,7 +1990,13 @@ def _perfometer_style(coverage_pct: int) -> str:
     Checkmk fuer state0/state1 (helle Hintergruende) ebenfalls tut.
     """
     pct = max(0, min(100, coverage_pct))
-    if pct >= 90:
+    # 0.9.0-b29: je Host bestimmt der Status die Farbe (die Status-Spalte
+    # entfaellt) - sonst waere ein WARN-Host mit 92 % gruen. Ohne Status
+    # (Gesamt-Balken) weiter nach Prozent.
+    by_status = {"OK": "#13d389", "WARN": "#ffd703", "CRIT": "#c83232"}
+    if status is not None:
+        fill = by_status.get(status, "#a0a0a0")  # UNKNOWN grau
+    elif pct >= 90:
         fill = "#13d389"  # gruen, wie state0
     elif pct >= 50:
         fill = "#ffd703"  # gelb, wie state1
@@ -2007,18 +2007,6 @@ def _perfometer_style(coverage_pct: int) -> str:
         f"#e0e0e0 {pct}%, #e0e0e0 100%); text-align:center; font-weight:bold; "
         "color:#000; border-radius:4px;"
     )
-
-
-def _status_to_state_class(status: str) -> str:
-    """Schritt 1a: exakt dieselbe CSS-Klasse wie die normale Checkmk
-    Service-Tabelle. Live auf der Test-Site (Checkmk 2.5)
-    nachgeschlagen: die Statuszelle einer Service-Zeile bekommt
-    class="state svcstate state<N>" mit N=0 (OK), 1 (WARN), 2 (CRIT),
-    3 (UNKNOWN) - siehe cmk.gui HTML-Renderer fuer Service-Tabellen
-    sowie themes/facelift/theme.css (.state.state0/.state1/.state2
-    Regeln fuer die Ampelfarben gruen/gelb/rot).
-    """
-    return {"OK": "state0", "WARN": "state1", "CRIT": "state2"}.get(status, "state3")
 
 
 def _host_link(host_name: str) -> HTML:
@@ -2329,10 +2317,12 @@ class PageMonitoringCoverageAnalyzer(Page):
         html.open_table(class_=("data", "table"))
         html.open_tr(class_="header")
         html.th("")  # Aufklapp-Pfeil-Spalte
-        html.th(_("Hostname"))
-        html.th(_("Status"))
+        # 0.9.0-b29: Status-Spalte entfaellt (Farbe der Coverage-Spalte),
+        # Hostname doppelt so breit (frueher ~215 px, brach zu frueh um).
+        html.th(_("Hostname"), style="min-width:430px")
         html.th(_("Coverage"))
-        html.th(_("Subsystems"))
+        # Abstand zum Coverage-Balken (fuellt seine Zelle bis zum Rand).
+        html.th(_("Subsystems"), style="padding-left:12px")
         html.th(_("Findings"))
         html.close_tr()
         for idx, result in enumerate(results):
@@ -2365,28 +2355,21 @@ class PageMonitoringCoverageAnalyzer(Page):
             html.open_td()
             html.write_html(_host_link(result.host_name))
             html.close_td()
-            # Schritt 1a: exakt dieselbe CSS-Klasse UND dieselbe innere
-            # Markup-Struktur wie die normale Checkmk Service-Tabelle
-            # ("state svcstate state<N>" + inneres span.state_rounded_fill
-            # fuer die abgerundeten Ecken - live auf der Test-Site per
-            # curl gegen view.py?view_name=host verifiziert).
-            html.open_td(class_=f"state svcstate {_status_to_state_class(result.status)}")
-            html.open_span(class_="state_rounded_fill")
-            html.write_text(result.status)
-            html.close_span()
-            html.close_td()
             # Schritt 1c: Perf-o-Meter-artiger Hintergrundbalken.
-            html.open_td(style=_perfometer_style(result.coverage_pct))
+            html.open_td(
+                style=_perfometer_style(result.coverage_pct, result.status),
+                title=result.status,
+            )
             html.write_text(f"{result.coverage_pct}%")
             html.close_td()
-            html.td(result.fraction_text)
+            html.td(result.fraction_text, style="padding-left:12px")
             html.td(result.findings)
             html.close_tr()
 
             html.open_tr(id_=row_id, style="display:none")
             html.open_td()
             html.close_td()
-            html.open_td(colspan=5)
+            html.open_td(colspan=4)
             sections = _detail_sections_for(result, lookup)
             if sections:
                 for heading, lines in sections:
