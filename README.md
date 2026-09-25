@@ -86,6 +86,18 @@ monitoring_coverage_analyzer-setup
 omd restart apache
 ```
 
+## Distributed monitoring
+
+Install and run the setup on the central site only. The central site
+analyzes the hosts of all sites; the agent output of hosts on a remote
+site is fetched from that site via remote automation
+(`get-agent-output ... @cached`, remote site must run 2.5.0p15 or later).
+The service data reaches the remote sites through the piggyback hub,
+which must be enabled on the central and the remote sites. The remote
+sites only need the package itself (e.g. via "Replicate extensions").
+If a remote site cannot be reached, its hosts show an "analysis
+incomplete" finding instead of a result.
+
 ## Repository layout
 
 ```

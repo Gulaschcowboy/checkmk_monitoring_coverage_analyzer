@@ -607,6 +607,7 @@ _PIGGYBACK_MARKER_RE = re.compile(r"^<<<<(.*)>>>>\s*$")
 _AGENT_OUTPUT_WORKERS = 4
 _AGENT_OUTPUT_TIMEOUT = 60
 SRC_AUTOMATION = "get-agent-output @cached"
+SRC_REMOTE_AUTOMATION = "remote get-agent-output @cached"
 
 
 class _AgentSections(NamedTuple):
@@ -618,6 +619,9 @@ class _AgentSections(NamedTuple):
     # Nachweis, dass ein hier verteiltes Plug-in Daten liefert (z.B.
     # oxidized: nur Piggyback-Daten fuer die gesicherten Geraete).
     piggyback: Mapping[str, frozenset[str]] = {}
+    # 0.9.0-b27: Remote-Site nicht erreichbar/nicht angemeldet - die Analyse
+    # des Hosts ist unvollstaendig (nicht nur "keine Agent-Daten").
+    site_error: bool = False
 
 
 def _parse_piggyback_sections(raw_text: str) -> dict[str, frozenset[str]]:
@@ -703,12 +707,75 @@ def _automation_agent_sections(host_name: str) -> _AgentSections:
         detail = (proc.stderr or proc.stdout or "").strip()[:300]
         return _AgentSections({}, SRC_AUTOMATION, f"unparsable response ({exc!r}): {detail}")
 
+    return _sections_from_result((success, details, raw), SRC_AUTOMATION)
+
+
+def _sections_from_result(result: object, source: str) -> _AgentSections:
+    """(success, details, raw_agent_data) -> _AgentSections."""
+    try:
+        success, details, raw = result  # type: ignore[misc]
+    except (TypeError, ValueError):
+        return _AgentSections({}, source, f"unexpected response: {str(result)[:200]}")
     raw_text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
     error = None if success else (str(details).strip() or "fetch failed")
     return _AgentSections(
-        _parse_agent_sections(raw_text), SRC_AUTOMATION, error,
+        _parse_agent_sections(raw_text), source, error,
         _parse_piggyback_sections(raw_text),
     )
+
+
+# 0.9.0-b27: Distributed Monitoring. Hosts einer Remote-Site haben auf der
+# Zentrale keinen Agent-Cache - die Zentrale holt die Agent-Ausgabe daher
+# per Remote-Automation von der zustaendigen Site (wie Checkmks eigenes
+# "Download agent output"), ebenfalls mit "@cached" (Remote-Site braucht
+# 2.5.0p15+, sonst fragt sie den Agenten live ab). do_remote_automation ist
+# eine interne GUI-Funktion: Aenderungen der Signatur fuehren zu einer
+# Fehlermeldung je Host, nicht zum Abbruch.
+def _remote_automation_config(site_id: str) -> tuple[object | None, str | None]:
+    """(RemoteAutomationConfig, None) oder (None, Fehlertext)."""
+    try:
+        from cmk.gui.config import active_config
+        from cmk.gui.watolib.automations import remote_automation_config_from_site_config
+
+        site_config = active_config.sites.get(site_id)
+        if site_config is None:
+            return None, f"site {site_id!r} is not configured"
+        return remote_automation_config_from_site_config(site_config), None
+    except Exception as exc:  # pragma: no cover - GUI-intern
+        return None, f"site {site_id!r}: {exc}"
+
+
+def _remote_agent_sections(host_name: str, automation_config: object) -> _AgentSections:
+    from cmk.gui.watolib.automations import do_remote_automation
+    from cmk.gui.watolib.utils import mk_repr
+
+    result = do_remote_automation(
+        automation_config,  # type: ignore[arg-type]
+        "checkmk-automation",
+        [
+            ("automation", "get-agent-output"),
+            ("arguments", mk_repr([host_name, "agent", "@cached"]).decode("ascii")),
+            ("indata", mk_repr("").decode("ascii")),
+            ("stdin_data", mk_repr("").decode("ascii")),
+            ("timeout", mk_repr(_AGENT_OUTPUT_TIMEOUT).decode("ascii")),
+        ],
+        debug=False,
+        timeout=_AGENT_OUTPUT_TIMEOUT,
+    )
+    return _sections_from_result(result, SRC_REMOTE_AUTOMATION)
+
+
+def _is_local_site(site_id: str | None) -> bool:
+    if not site_id:
+        return True
+    try:
+        from cmk.gui.config import active_config
+        from cmk.gui.site_config import site_is_local
+
+        site_config = active_config.sites.get(site_id)
+        return site_config is None or site_is_local(site_config)
+    except Exception:  # pragma: no cover - GUI-intern
+        return True
 
 
 def _agent_sections(host_name: str) -> _AgentSections:
@@ -717,12 +784,44 @@ def _agent_sections(host_name: str) -> _AgentSections:
     return _automation_agent_sections(host_name)
 
 
-def _collect_agent_sections(host_names: Sequence[str]) -> dict[str, _AgentSections]:
+def _collect_agent_sections(
+    host_names: Sequence[str], host_sites: Mapping[str, str] | None = None
+) -> dict[str, _AgentSections]:
     """Agent-Sections fuer alle Hosts eines Analyse-Laufs, parallel
     (live gemessen auf der Test-Site, 46 Hosts: seriell 23 s, 4 Worker 8 s,
-    8 Worker kein weiterer Gewinn)."""
+    8 Worker kein weiterer Gewinn). Hosts auf Remote-Sites per
+    Remote-Automation; ist eine Site nicht erreichbar, bekommen die
+    restlichen Hosts dieser Site denselben Fehler ohne weiteren Versuch."""
+    host_sites = host_sites or {}
+    remote_configs: dict[str, tuple[object | None, str | None]] = {}
+    site_errors: dict[str, str] = {}
+
+    for site_id in {host_sites.get(h) for h in host_names}:
+        if site_id and not _is_local_site(site_id):
+            remote_configs[site_id] = _remote_automation_config(site_id)
+
+    def _fetch(host_name: str) -> _AgentSections:
+        site_id = host_sites.get(host_name)
+        if site_id not in remote_configs:
+            return _agent_sections(host_name)
+        if not _SAFE_HOST_RE.match(host_name):
+            return _AgentSections({}, "", "unsafe host name")
+        automation_config, config_error = remote_configs[site_id]
+        if automation_config is None:
+            return _AgentSections({}, SRC_REMOTE_AUTOMATION, config_error, site_error=True)
+        if site_id in site_errors:
+            return _AgentSections({}, SRC_REMOTE_AUTOMATION, site_errors[site_id], site_error=True)
+        try:
+            return _remote_agent_sections(host_name, automation_config)
+        except Exception as exc:
+            # Verbindungs-/Auth-/HTTP-Fehler betreffen die ganze Site
+            # (Host-Fehler kommen als success=False zurueck).
+            message = f"site {site_id!r}: {exc}"
+            site_errors.setdefault(site_id, message)
+            return _AgentSections({}, SRC_REMOTE_AUTOMATION, message, site_error=True)
+
     with ThreadPoolExecutor(max_workers=_AGENT_OUTPUT_WORKERS) as executor:
-        return dict(zip(host_names, executor.map(_agent_sections, host_names)))
+        return dict(zip(host_names, executor.map(_fetch, host_names)))
 
 
 # ---------------------------------------------------------------------------
@@ -1462,6 +1561,19 @@ def _analyze_host(
             "plugins": list(s.via), "evidence": list(s.evidence),
             "state": state_txt, "hint": hint,
         })
+    # 0.9.0-b27: Remote-Site nicht erreichbar -> Analyse unvollstaendig,
+    # sichtbar als Finding statt still OK (nur auf Check-Commands gestuetzt).
+    if agent_sections.site_error:
+        items.append({
+            "kind": "open", "token": "remote_site_unreachable",
+            "title": _("Agent output from remote site"),
+            "plugins": [], "evidence": [str(agent_sections.error)],
+            "state": _("unavailable, analysis incomplete"),
+            "hint": _(
+                "Check that the central site is logged in to the remote site "
+                "(Setup > Distributed monitoring) and that the remote site is reachable."
+            ),
+        })
     for family, evidence in sorted((generic_found or {}).items()):
         entry = (generic_catalog or {}).get(family)
         if entry is None:
@@ -1656,10 +1768,15 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
         )
         return []
     try:
-        rows = connection.query(
-            "GET hosts\n"
-            "Columns: name tags labels\n"
-        )
+        # 0.9.0-b27: Site je Host (Distributed Monitoring), damit die
+        # Agent-Ausgabe von der zustaendigen Site geholt wird.
+        with sites.prepend_site():
+            site_rows = connection.query(
+                "GET hosts\n"
+                "Columns: name tags labels\n"
+            )
+        rows = [row[1:] for row in site_rows]
+        host_sites = {row[1]: row[0] for row in site_rows}
         # services_with_info/-fullstate liefern KEIN check_command; dafuer
         # separat alle Service-Check-Commands je Host abfragen (eine
         # einzige Livestatus-Query fuer den gesamten Analyse-Lauf, nicht
@@ -1707,7 +1824,7 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
 
     # 0.9.0-b7: Agent-Ausgaben aller Hosts EINMAL pro Lauf, parallel, aus
     # dem Core-Cache (get-agent-output @cached) - keine Agent-Abfrage.
-    sections_by_host = _collect_agent_sections([h for h, _labels in agent_rows])
+    sections_by_host = _collect_agent_sections([h for h, _labels in agent_rows], host_sites)
 
     # 0.9.0-b21: generischer Abgleich - erst fuer alle Hosts sammeln, dann
     # Familien entfernen, die auf fast allen Hosts desselben OS laufen
