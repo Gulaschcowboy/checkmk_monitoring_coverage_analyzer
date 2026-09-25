@@ -1135,12 +1135,39 @@ def _generic_title(family: str, titles: Sequence[str]) -> str:
     return max(counts.items(), key=lambda kv: (kv[1], -len(kv[0])))[0]
 
 
+# 0.9.0-b28: Namensteile, die nur das Betriebssystem des Hosts nennen
+# ("Windows Update", "Windows Event Log"), sind kein Beleg fuer eine
+# Anwendung - sonst trifft z.B. die Plug-in-Familie "windows" auf jedem
+# Windows-Host. Gilt je Host fuer dessen OS (Labels cmk/os_type und
+# cmk/os_family), Hersteller-Familien bleiben unberuehrt.
+_OS_NAME_TOKENS: Mapping[str, frozenset[str]] = {
+    "windows": frozenset({"windows", "win", "microsoft"}),
+    "linux": frozenset({"linux"}),
+    "freebsd": frozenset({"freebsd", "bsd"}),
+    "solaris": frozenset({"solaris", "sunos"}),
+    "aix": frozenset({"aix"}),
+}
+
+
+def _os_name_tokens(labels: Mapping[str, str]) -> frozenset[str]:
+    """Namensteile, die das OS des Hosts bezeichnen (aus os_type/os_family)."""
+    tokens: set[str] = set()
+    for key in ("cmk/os_type", "cmk/os_family"):
+        value = str(labels.get(key, "")).strip().lower()
+        if value:
+            tokens.add(value)
+            tokens |= _OS_NAME_TOKENS.get(value, frozenset())
+    return frozenset(tokens)
+
+
 def _generic_candidates(
     runtime: _Runtime,
     check_commands: Sequence[str],
     catalog: Mapping[str, _GenericFamily],
+    os_tokens: frozenset[str] = frozenset(),
 ) -> dict[str, list[str]]:
-    """Familie -> Belege fuer einen Host (ohne OS-Haeufigkeitsfilter)."""
+    """Familie -> Belege fuer einen Host (ohne OS-Haeufigkeitsfilter).
+    os_tokens: Namensteile des Host-OS, zaehlen nicht als Beleg."""
     monitored_families = {
         _plugin_family(cmd[len("check_mk-"):].split("!")[0])
         for cmd in check_commands
@@ -1159,7 +1186,7 @@ def _generic_candidates(
     found: dict[str, list[str]] = {}
     for text, tokens in evidence_sources:
         for token in tokens:
-            if token in STOP_TOKENS:
+            if token in STOP_TOKENS or token in os_tokens:
                 continue
             for family in catalog:
                 if family in monitored_families or not _generic_token_matches(token, family):
@@ -1189,7 +1216,8 @@ def _generic_by_host(
         os_by_host[host_name] = os_family
         hosts_per_os[os_family] = hosts_per_os.get(os_family, 0) + 1
         found_by_host[host_name] = _generic_candidates(
-            _runtime_facts(sec.sections), check_commands_by_host.get(host_name, []), catalog
+            _runtime_facts(sec.sections), check_commands_by_host.get(host_name, []), catalog,
+            _os_name_tokens(labels),
         )
     per_os_family: dict[tuple[str, str], int] = {}
     for host_name, found in found_by_host.items():
