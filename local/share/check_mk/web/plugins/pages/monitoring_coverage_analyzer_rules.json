@@ -201,7 +201,7 @@
       "runtime": ["systemd:^unifi\\.service$"]
     },
     "mssql": {
-      "runtime": ["winservice:^MSSQL(\\$\\S+|SERVER)$"]
+      "runtime": ["winservice:^MSSQL(\\$(?!MICROSOFT##(WID|SSEE)$)\\S+|SERVER)$"]
     },
     "iis": {
       "runtime": ["winservice:^W3SVC$"]
