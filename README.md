@@ -34,7 +34,10 @@ so no additional agent queries are made).
 - **Setup rule** "Monitoring coverage analysis" (Setup > Services >
   Service monitoring rules): ignore findings (false positives or accepted
   gaps) by regular expressions on subsystem, check plug-in and evidence,
-  and choose whether generic candidates are info only or WARN. Applies to
+  and disable the fuzzy search for potential check candidates (or show its
+  results as info only) for single or all hosts. By default, fuzzy
+  candidates are treated like other findings (WARN); the choice 'Enable'
+  re-enables them where a more general rule disables them. Applies to
   the service and the GUI page alike, right after activating changes.
 
 ## Evidence sources

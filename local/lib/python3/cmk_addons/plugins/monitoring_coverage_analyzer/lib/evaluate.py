@@ -28,6 +28,17 @@ from typing import Any, NamedTuple
 
 GENERIC_INFO = "info"
 GENERIC_WARN = "warn"
+GENERIC_OFF = "off"
+
+
+def generic_mode(params: Mapping[str, Any] | None) -> str:
+    """Modus der generischen (Fuzzy-)Kandidaten aus der Setup-Regel.
+
+    Default (keine Regel/kein Wert): WARN, d.h. wie andere Findings. Die
+    Regel kann sie abschalten ("off") oder nur als Info zeigen ("info").
+    """
+    mode = (params or {}).get("fuzzy_search", GENERIC_WARN)
+    return mode if mode in (GENERIC_OFF, GENERIC_INFO, GENERIC_WARN) else GENERIC_WARN
 
 
 class IgnoreRule(NamedTuple):
@@ -134,7 +145,7 @@ def _item_line(item: Mapping[str, Any]) -> str:
 def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | None) -> Evaluation:
     params = params or {}
     rules = parse_ignore_rules(params)
-    generic_mode = params.get("generic_candidates", GENERIC_INFO)
+    mode = generic_mode(params)
 
     monitored = [i for i in items if i.get("kind") == "monitored"]
     open_items: list[Mapping[str, Any]] = []
@@ -143,6 +154,10 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
     for item in items:
         kind = item.get("kind")
         if kind not in ("open", "candidate"):
+            continue
+        # Fuzzy-Suche per Regel abgeschaltet: Kandidaten komplett weglassen
+        # (auch nicht unter "Ignored").
+        if kind == "candidate" and mode == GENERIC_OFF:
             continue
         rule = matching_ignore_rule(item, rules)
         if rule is not None:
@@ -158,7 +173,7 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
             candidates.append(item)
 
     # Generische Kandidaten zaehlen nur im WARN-Modus wie offene Findings.
-    counting_open = open_items + (candidates if generic_mode == GENERIC_WARN else [])
+    counting_open = open_items + (candidates if mode == GENERIC_WARN else [])
     total = len(monitored) + len(counting_open)
     monitored_n = len(monitored)
     coverage_pct = 100 if total == 0 else round(100 * monitored_n / total)
@@ -213,12 +228,12 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
 
 
 def detail_sections(
-    evaluation: Evaluation, source_lines: Sequence[str], generic_mode: str = GENERIC_INFO
+    evaluation: Evaluation, source_lines: Sequence[str], mode: str = GENERIC_WARN
 ) -> list[tuple[str, list[str]]]:
     """Detail-Abschnitte in fester Reihenfolge; leere entfallen."""
     candidate_heading = (
         "Candidates (generic match):"
-        if generic_mode == GENERIC_WARN
+        if mode == GENERIC_WARN
         else "Candidates (generic match, info only):"
     )
     return [
@@ -235,10 +250,10 @@ def detail_sections(
 
 
 def detail_lines(
-    evaluation: Evaluation, source_lines: Sequence[str], generic_mode: str = GENERIC_INFO
+    evaluation: Evaluation, source_lines: Sequence[str], mode: str = GENERIC_WARN
 ) -> list[str]:
     out: list[str] = []
-    for heading, lines in detail_sections(evaluation, source_lines, generic_mode):
+    for heading, lines in detail_sections(evaluation, source_lines, mode):
         if out:
             out.append("")
         out.append(heading)

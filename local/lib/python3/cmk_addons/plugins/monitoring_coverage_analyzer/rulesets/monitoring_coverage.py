@@ -90,27 +90,30 @@ def _parameter_form() -> Dictionary:
                     add_element_label=Label("Add ignore entry"),
                 ),
             ),
-            "generic_candidates": DictElement(
+            "fuzzy_search": DictElement(
                 required=False,
                 parameter_form=SingleChoice(
-                    title=Title("Generic candidates"),
+                    title=Title("Disable fuzzy search for potential check candidates"),
                     help_text=Help(
-                        "Candidates found by the generic (fuzzy) match of running "
-                        "services and processes against the check plug-ins of "
-                        "this site. They are not backed by a curated rule and can "
-                        "be wrong."
+                        "Use or disable candidates found by fuzzy matching running "
+                        "services and processes to the available Checkmk check "
+                        "plug-ins. Enabled by default."
                     ),
                     elements=[
+                        SingleChoiceElement(
+                            name="off",
+                            title=Title("Disable (no fuzzy candidates are shown)"),
+                        ),
                         SingleChoiceElement(
                             name="info",
                             title=Title("Show as info only (no effect on status and coverage)"),
                         ),
                         SingleChoiceElement(
                             name="warn",
-                            title=Title("Treat like other findings (WARN, counts for coverage)"),
+                            title=Title("Enable (treat like other findings, WARN, counts for coverage)"),
                         ),
                     ],
-                    prefill=DefaultValue("info"),
+                    prefill=DefaultValue("warn"),
                 ),
             ),
         },

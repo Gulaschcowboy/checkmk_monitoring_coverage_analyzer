@@ -110,7 +110,7 @@ def check_monitoring_coverage(params: Mapping[str, Any], section: Mapping[str, A
         detail_lines: Any = _ev.detail_lines(
             evaluation,
             [str(x) for x in section.get("source_lines") or []],
-            str(params.get("generic_candidates", _ev.GENERIC_INFO)),
+            _ev.generic_mode(params),
         )
     else:
         # Section eines aelteren Analyse-Laufs (vor b21): fertiges Ergebnis,

@@ -1410,7 +1410,7 @@ def _detail_sections_for(result: _HostResult, lookup: Any) -> list[tuple[str, li
     """Detail-Abschnitte der Seite (gleiche Reihenfolge wie im Long Output
     des Service); leere Abschnitte entfallen."""
     params = lookup.params_for(result.host_name) if result.items else {}
-    mode = str(params.get("generic_candidates", _ev.GENERIC_INFO))
+    mode = _ev.generic_mode(params)
     candidate_heading = (
         _("Candidates (generic match):")
         if mode == _ev.GENERIC_WARN
@@ -1821,7 +1821,7 @@ def _build_result(
     """Auswertung der Items mit den Parametern der Setup-Regel (None = ohne
     Regel, Default-Verhalten) -> _HostResult fuer Anzeige/Cache."""
     evaluation = _ev.evaluate(items, params)
-    mode = str((params or {}).get("generic_candidates", _ev.GENERIC_INFO))
+    mode = _ev.generic_mode(params)
     return _HostResult(
         host_name=host_name,
         status=evaluation.status,
