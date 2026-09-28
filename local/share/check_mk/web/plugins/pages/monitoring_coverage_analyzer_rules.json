@@ -32,6 +32,7 @@
     "proxmox": "proxmox",
     "unifi": "unifi",
     "veeam": "veeam", "veeam_backup_status": "veeam",
+    "smart": "smart", "smart_posix": "smart", "smartd": "smart", "smartmontools": "smart",
     "azure_v2_ad_sync": "entra_connect", "azure_ad_sync": "entra_connect",
     "citrix_state": "citrix_vda", "citrix_state_controller": "citrix_vda",
     "citrix_state_hosting_server": "citrix_vda", "citrix_serverload": "citrix_vda",
@@ -78,6 +79,7 @@
     "esx": "VMware vSphere VM (piggyback)",
     "citrix": "Citrix Delivery Controller",
     "entra_connect": "Microsoft Entra Connect (AD Connect)",
+    "smart": "S.M.A.R.T. Disk Health",
     "citrix_vda": "Citrix VDA (piggyback)",
     "checkmk": "Checkmk Agent (Self-Monitoring)",
     "zfs": "ZFS",
@@ -124,6 +126,7 @@
     "unifi": "Configure the 'UniFi' special agent, then run discovery.",
     "veeam": "Deploy the 'veeam_backup_status.ps1' agent plug-in on the backup server, then run discovery.",
     "citrix": "Deploy the 'citrix_farm.ps1' agent plug-in on the Delivery Controller (VDA data arrives as piggyback), then run discovery.",
+    "smart": "Deploy the 'smart_posix' agent plug-in (needs smartmontools; older: 'smart'), then run discovery.",
     "entra_connect": "Entra Connect detected. Its sync status is monitored via the 'Azure' special agent (option 'Entra Connect Sync') on the tenant host, not on this server. Configure the special agent for the tenant, then run discovery on that host.",
     "citrix_vda": "Citrix VDA detected, piggyback data from the Delivery Controller missing. Deploy the 'citrix_farm.ps1' agent plug-in on the Delivery Controller and make sure the VDA machine names match the host names in Checkmk, otherwise use the ruleset 'Host name translation for piggybacked hosts'.",
     "esx": "VMware VM detected, piggyback data missing. Configure the 'VMware ESX via vSphere' special agent for vCenter/ESXi and make sure the VM names match the host names in Checkmk, otherwise use the ruleset 'Host name translation for piggybacked hosts'.",
@@ -224,6 +227,10 @@
     },
     "citrix": {
       "runtime": ["winservice:^Citrix(Broker|Host|MachineCreation)Service$"]
+    },
+    "smart": {
+      "runtime": ["systemd:^(smartd|smartmontools)\\.service$", "process:^smartd$"],
+      "not_on_os": ["windows"]
     },
     "entra_connect": {
       "runtime": ["winservice:^(ADSync|AzureADConnectAuthenticationAgent|AzureADConnectAgentUpdater)$"],
