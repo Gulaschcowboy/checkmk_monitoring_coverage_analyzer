@@ -15,6 +15,7 @@ Item (dict, JSON-serialisierbar):
   evidence: Belege (Texte)
   state:    Kurztext, z.B. "running, not monitored"
   hint:     Handlungshinweis (optional)
+  sources:  Datenquellen (optional, generische Treffer)
 
 Keine Abhaengigkeit von cmk.gui oder cmk.agent_based - nur stdlib.
 """
@@ -118,10 +119,14 @@ def _compact_plugins(plugins: Sequence[str], min_group: int = 3) -> str:
 
 
 def _item_line(item: Mapping[str, Any]) -> str:
-    return "%s: %s – available plug-in(s): %s [detected via %s]" % (
+    # sources (optional, generische Treffer): passende Agent-Plug-ins /
+    # Special Agents als Datenquelle der Check-Plug-ins.
+    sources = item.get("sources") or ""
+    return "%s: %s – available plug-in(s): %s%s [detected via %s]" % (
         item.get("title", ""),
         item.get("state", ""),
         _short_plugins(item.get("plugins") or []),
+        f" – data source: {sources}" if sources else "",
         "; ".join(item.get("evidence") or []),
     )
 
@@ -179,6 +184,11 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
     findings_parts = []
     for item in by_title(counting_open):
         hint = item.get("hint") or ""
+        # Generische Treffer: "<state>. <hint>" (Hint ist dort ein kurzer
+        # Verweis auf die Details, keine Handlungsanweisung).
+        if hint and item.get("kind") == "candidate":
+            findings_parts.append("%s: %s. %s" % (item.get("title", ""), item.get("state", ""), hint))
+            continue
         findings_parts.append(
             "%s: %s%s" % (item.get("title", ""), item.get("state", ""), f" ({hint})" if hint else "")
         )

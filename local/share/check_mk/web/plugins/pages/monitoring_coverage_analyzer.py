@@ -1080,6 +1080,92 @@ def _generic_token_matches(token: str, family: str) -> bool:
 class _GenericFamily(NamedTuple):
     title: str
     plugins: list[str]
+    # 0.9.0-b37: passende Datenquellen fuer den Hint (Agent-Plug-in-Dateien,
+    # Special Agents als (Name, Titel)); leer = nichts Passendes gefunden.
+    agent_plugins: tuple[str, ...] = ()
+    special_agents: tuple[tuple[str, str], ...] = ()
+
+
+# Verzeichnisse der verteilbaren Agent-Plug-ins (Linux/Unix und Windows),
+# jeweils Site-Version und local-Hierarchie (MKPs).
+_AGENT_PLUGIN_DIRS = (
+    "share/check_mk/agents/plugins",
+    "share/check_mk/agents/windows/plugins",
+    "local/share/check_mk/agents/plugins",
+    "local/share/check_mk/agents/windows/plugins",
+)
+# Special Agents: ausfuehrbare Datei libexec/agent_<name> je Plug-in-Paket.
+_SPECIAL_AGENT_GLOBS = (
+    "lib/python3/cmk/plugins/*/libexec/agent_*",
+    "local/lib/python3/cmk_addons/plugins/*/libexec/agent_*",
+)
+
+
+def _plugin_base(file_name: str) -> str:
+    """'mk_mysql.py' -> 'mysql', 'smart_posix' -> 'smart_posix'."""
+    base = file_name.strip().lower()
+    base = re.sub(r"\.(py|sh|ps1|vbs|bat|cmd|exe|pl)$", "", base)
+    for prefix in ("mk_", "mk-"):
+        if base.startswith(prefix):
+            base = base[len(prefix):]
+    return base
+
+
+def _family_matches(name: str, family: str) -> bool:
+    return name == family or name.startswith((family + "_", family + "-"))
+
+
+def _data_sources() -> tuple[list[str], list[tuple[str, str]]]:
+    """(Agent-Plug-in-Dateien, [(Special-Agent-Name, Titel)]) der Site,
+    mit demselben TTL-Cache wie 'cmk -L'. Titel aus der Setup-Regel
+    (special_agents:<name>), sonst der Name."""
+    now = time.time()
+    cached = _available_plugins_cache.get("sources")
+    if cached is not None and (now - cached[0]) < _AVAILABLE_PLUGINS_CACHE_TTL:
+        return cached[1]
+    omd_root = os.environ.get("OMD_ROOT", "")
+    files: set[str] = set()
+    specials: dict[str, str] = {}
+    if omd_root:
+        for rel in _AGENT_PLUGIN_DIRS:
+            try:
+                files.update(
+                    e.name for e in os.scandir(os.path.join(omd_root, rel)) if e.is_file()
+                )
+            except OSError:
+                continue
+        import glob
+
+        for pattern in _SPECIAL_AGENT_GLOBS:
+            for path in glob.glob(os.path.join(omd_root, pattern)):
+                specials.setdefault(os.path.basename(path)[len("agent_"):], "")
+    try:
+        from cmk.gui.watolib.rulespecs import rulespec_registry
+
+        for name in specials:
+            try:
+                specials[name] = str(rulespec_registry["special_agents:" + name].title or "")
+            except Exception:  # noqa: BLE001 - Titel ist nur Anzeige
+                pass
+    except Exception:  # noqa: BLE001
+        pass
+    result = (sorted(files), sorted((n, t or n) for n, t in specials.items()))
+    _available_plugins_cache["sources"] = (now, result)
+    return result
+
+
+def _sources_for_family(
+    family: str, plugins: Sequence[str], sources: tuple[list[str], list[tuple[str, str]]]
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    """Agent-Plug-ins und Special Agents, deren Name zur Familie passt
+    (gleich oder '<familie>_...'). Veraltete Special Agents nur, wenn es
+    keine anderen gibt."""
+    files, specials = sources
+    names = {family} | {p.lower() for p in plugins}
+    agent = tuple(f for f in files if _family_matches(_plugin_base(f), family))
+    special = [(n, t) for n, t in specials if _family_matches(n, family) or n in names]
+    current = [(n, t) for n, t in special if "deprecated" not in t.lower()]
+    return agent, tuple(current or special)
 
 
 def _generic_catalog() -> dict[str, _GenericFamily]:
@@ -1101,11 +1187,30 @@ def _generic_catalog() -> dict[str, _GenericFamily]:
             continue
         grouped.setdefault(family, []).append((name, title))
     catalog: dict[str, _GenericFamily] = {}
+    sources = _data_sources()
     for family, entries in grouped.items():
+        plugins = sorted(n for n, _t in entries)
+        agent, special = _sources_for_family(family, plugins, sources)
         catalog[family] = _GenericFamily(
-            _generic_title(family, [t for _n, t in entries]), sorted(n for n, _t in entries)
+            _generic_title(family, [t for _n, t in entries]), plugins, agent, special
         )
     return catalog
+
+
+def _generic_sources(entry: _GenericFamily) -> str:
+    """0.9.0-b39: passende Datenquellen eines generischen Treffers fuer die
+    Detailzeile (Agent-Plug-ins/Special Agents); der Findings-Text selbst
+    bleibt kurz und verweist nur auf die Details."""
+    parts = []
+    if entry.agent_plugins:
+        parts.append(_("agent plug-in(s) %s") % ", ".join(entry.agent_plugins[:4]))
+    if entry.special_agents:
+        parts.append(
+            _("special agent(s) %s") % ", ".join(f"'{t}'" for _n, t in entry.special_agents[:3])
+        )
+    if parts:
+        return "; ".join(parts)
+    return _("no matching agent plug-in or special agent (data may come from the agent itself)")
 
 
 def _generic_title(family: str, titles: Sequence[str]) -> str:
@@ -1606,8 +1711,11 @@ def _analyze_host(
         items.append({
             "kind": "candidate", "token": f"generic:{family}", "title": entry.title,
             "plugins": list(entry.plugins), "evidence": shown,
-            "state": _("running, not monitored (generic match)"),
-            "hint": _("Check if an agent plug-in or special agent for '%s' exists and deploy it, then run discovery.") % entry.title,
+            # 0.9.0-b39: kurzer Findings-Text; Check-Plug-ins und Datenquellen
+            # stehen in der Detailzeile (siehe lib/evaluate.py _item_line).
+            "state": _("possible match (fuzzy search)"),
+            "hint": _("See details for potential checks."),
+            "sources": _generic_sources(entry),
         })
 
     source_lines: list[str] = []
