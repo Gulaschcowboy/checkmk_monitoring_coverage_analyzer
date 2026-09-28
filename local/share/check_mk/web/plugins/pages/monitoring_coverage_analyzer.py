@@ -346,7 +346,7 @@ def _load_rules() -> _Rules:
                 continue
             detect[token] = {
                 kind: [str(item) for item in spec.get(kind) or [] if isinstance(item, str)]
-                for kind in ("direct", "runtime", "not_on_os")
+                for kind in ("direct", "runtime", "not_on_os", "monitored_elsewhere")
             }
     section_data = {
         str(k): str(v) for k, v in (data.get("section_data") or {}).items()
@@ -1429,6 +1429,32 @@ def _detail_sections_for(result: _HostResult, lookup: Any) -> list[tuple[str, li
     ]
 
 
+def _monitored_elsewhere(
+    token: str, host_name: str, check_commands_by_host: Mapping[str, Sequence[str]]
+) -> list[tuple[str, str]]:
+    """[(Host, Check-Plug-in)] anderer Hosts, deren Check-Plug-in auf eine
+    Regex aus detect.<token>.monitored_elsewhere passt (re.fullmatch)."""
+    patterns = DETECT.get(token, {}).get("monitored_elsewhere", [])
+    if not patterns:
+        return []
+    try:
+        regexes = [re.compile(p) for p in patterns]
+    except re.error:
+        return []
+    found: list[tuple[str, str]] = []
+    for other, commands in sorted(check_commands_by_host.items()):
+        if other == host_name:
+            continue
+        for cmd in commands:
+            if not cmd.startswith("check_mk-"):
+                continue
+            plugin = cmd[len("check_mk-"):].split("!")[0]
+            if any(r.fullmatch(plugin) for r in regexes):
+                found.append((other, plugin))
+                break
+    return found
+
+
 def _analyze_host(
     host_name: str,
     labels: Mapping[str, str],
@@ -1587,6 +1613,21 @@ def _analyze_host(
             items.append({
                 "kind": "monitored", "token": s.token, "title": s.title,
                 "plugins": list(s.via), "evidence": list(s.evidence), "state": "monitored",
+            })
+            continue
+        elsewhere = _monitored_elsewhere(s.token, host_name, check_commands_by_host or {})
+        if elsewhere:
+            # 0.9.0-b40: detect.<token>.monitored_elsewhere - wird zentral auf
+            # einem anderen Host ueberwacht (z.B. Entra Connect Sync ueber den
+            # Azure-Special-Agent am Tenant-Host), nicht auf diesem Server.
+            shown = ", ".join(f"{h} ({p})" for h, p in elsewhere[:3])
+            if len(elsewhere) > 3:
+                shown += f", ... (+{len(elsewhere) - 3})"
+            items.append({
+                "kind": "monitored", "token": s.token, "title": s.title,
+                "plugins": sorted({p for _h, p in elsewhere}),
+                "evidence": [*s.evidence, "monitored on: " + shown],
+                "state": _("monitored on another host: %s") % shown,
             })
             continue
         if s.kind == "deployed" and agent_sections is not None and agent_sections.piggyback:

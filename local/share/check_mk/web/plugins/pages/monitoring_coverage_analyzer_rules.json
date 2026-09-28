@@ -32,6 +32,7 @@
     "proxmox": "proxmox",
     "unifi": "unifi",
     "veeam": "veeam", "veeam_backup_status": "veeam",
+    "azure_v2_ad_sync": "entra_connect", "azure_ad_sync": "entra_connect",
     "citrix_state": "citrix_vda", "citrix_state_controller": "citrix_vda",
     "citrix_state_hosting_server": "citrix_vda", "citrix_serverload": "citrix_vda",
     "citrix_sessions": "citrix_vda", "citrix_xenapp": "citrix_vda",
@@ -76,6 +77,7 @@
     "veeam": "Veeam Backup & Replication",
     "esx": "VMware vSphere VM (piggyback)",
     "citrix": "Citrix Delivery Controller",
+    "entra_connect": "Microsoft Entra Connect (AD Connect)",
     "citrix_vda": "Citrix VDA (piggyback)",
     "checkmk": "Checkmk Agent (Self-Monitoring)",
     "zfs": "ZFS",
@@ -122,6 +124,7 @@
     "unifi": "Configure the 'UniFi' special agent, then run discovery.",
     "veeam": "Deploy the 'veeam_backup_status.ps1' agent plug-in on the backup server, then run discovery.",
     "citrix": "Deploy the 'citrix_farm.ps1' agent plug-in on the Delivery Controller (VDA data arrives as piggyback), then run discovery.",
+    "entra_connect": "Entra Connect detected. Its sync status is monitored via the 'Azure' special agent (option 'Entra Connect Sync') on the tenant host, not on this server. Configure the special agent for the tenant, then run discovery on that host.",
     "citrix_vda": "Citrix VDA detected, piggyback data from the Delivery Controller missing. Deploy the 'citrix_farm.ps1' agent plug-in on the Delivery Controller and make sure the VDA machine names match the host names in Checkmk, otherwise use the ruleset 'Host name translation for piggybacked hosts'.",
     "esx": "VMware VM detected, piggyback data missing. Configure the 'VMware ESX via vSphere' special agent for vCenter/ESXi and make sure the VM names match the host names in Checkmk, otherwise use the ruleset 'Host name translation for piggybacked hosts'.",
     "checkmk": "Ensure the Checkmk agent self-monitoring services (checkmk_agent) are discovered.",
@@ -144,7 +147,7 @@
     "tcpconn", "netif", "if", "interfaces", "hr", "snmp", "intel", "watchdog",
     "iptables", "mtr", "site", "monitoring_coverage_self"
   ],
-  "_comment_detect": "Evidence from agent output. Sections whose name maps to a token (via aliases) count automatically if they contain data. direct: extra conditions for 'data arrives' (discovery missing). runtime: service/process is running (agent plug-in missing). not_on_os: cmk/os_family values where the plug-in does not run. Conditions: section:<sec>[/<sub>]:data | section:<sec>[/<sub>]:contains:<regex> | systemd:<regex> | process:<regex> | winservice:<regex> (re.search, anchor as needed).",
+  "_comment_detect": "Evidence from agent output. Sections whose name maps to a token (via aliases) count automatically if they contain data. direct: extra conditions for 'data arrives' (discovery missing). runtime: service/process is running (agent plug-in missing). not_on_os: cmk/os_family values where the plug-in does not run. monitored_elsewhere: check plug-in regexes (full match); covered if any other host has such a service (centrally monitored, e.g. via a special agent). Conditions: section:<sec>[/<sub>]:data | section:<sec>[/<sub>]:contains:<regex> | systemd:<regex> | process:<regex> | winservice:<regex> (re.search, anchor as needed).",
   "detect": {
     "zfs": {
       "direct": ["section:zpool:data", "section:zpool_status:data"]
@@ -222,6 +225,10 @@
     "citrix": {
       "runtime": ["winservice:^Citrix(Broker|Host|MachineCreation)Service$"]
     },
+    "entra_connect": {
+      "runtime": ["winservice:^(ADSync|AzureADConnectAuthenticationAgent|AzureADConnectAgentUpdater)$"],
+      "monitored_elsewhere": ["azure(_v2)?_ad_sync"]
+    },
     "citrix_vda": {
       "runtime": ["winservice:^BrokerAgent$"]
     },
@@ -239,7 +246,7 @@
   "_comment_section_ignore": "Sections that never count as evidence.",
   "section_ignore": [],
   "_comment_generic_ignore_families": "Check plug-in families never suggested by the generic match (names too common to be evidence). Families known from 'titles'/'aliases' are handled by the curated rules only.",
-  "generic_ignore_families": ["local", "win", "job", "custom", "metric"],
+  "generic_ignore_families": ["local", "win", "job", "custom", "metric", "azure"],
   "_comment_empty_ok": "Sections where a deployed plug-in with an empty section is a valid state (nothing to monitor), not a broken plug-in.",
   "empty_ok": ["windows_tasks"]
 }
