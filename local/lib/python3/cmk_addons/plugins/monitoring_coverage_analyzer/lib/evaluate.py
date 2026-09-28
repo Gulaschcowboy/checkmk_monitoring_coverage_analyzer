@@ -20,6 +20,7 @@ Keine Abhaengigkeit von cmk.gui oder cmk.agent_based - nur stdlib.
 """
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, NamedTuple
@@ -103,6 +104,19 @@ def _short_plugins(plugins: Sequence[str], limit: int = 5) -> str:
     return text + (f", ... (+{len(names) - limit})" if len(names) > limit else "")
 
 
+def _compact_plugins(plugins: Sequence[str], min_group: int = 3) -> str:
+    """Ab min_group Namen mit gemeinsamem Praefix (bis zum letzten '_')
+    als '<praefix>*' zusammenfassen, z.B. esx_vsphere_vm_cpu, ..._name ->
+    'esx_vsphere_vm_*'. Sonst die volle Liste."""
+    names = list(plugins)
+    if len(names) >= min_group:
+        prefix = os.path.commonprefix(names)
+        prefix = prefix[: prefix.rfind("_") + 1]
+        if len(prefix) > 1:
+            return prefix + "*"
+    return ", ".join(names)
+
+
 def _item_line(item: Mapping[str, Any]) -> str:
     return "%s: %s – available plug-in(s): %s [detected via %s]" % (
         item.get("title", ""),
@@ -155,7 +169,7 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
     unmonitored_lines = [_item_line(i) for i in by_title(open_items)]
     candidate_lines = [_item_line(i) for i in by_title(candidates)]
     monitored_lines = [
-        "%s: monitored (via %s)" % (i.get("title", ""), ", ".join(i.get("plugins") or []))
+        "%s: monitored (via %s)" % (i.get("title", ""), _compact_plugins(i.get("plugins") or []))
         if i.get("state", "monitored") == "monitored"
         # z.B. "plug-in deployed, all services disabled by rule (12)"
         else "%s: %s" % (i.get("title", ""), i.get("state", ""))
