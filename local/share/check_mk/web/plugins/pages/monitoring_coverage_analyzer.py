@@ -2256,6 +2256,59 @@ def _apply_rules(results: Sequence[_HostResult], lookup: _RuleLookup) -> list[_H
     return out
 
 
+# Sortierung der Host-Tabelle per Klick auf den Spaltenkopf, wie in den
+# Checkmk-Views (cmk.gui.views.sort_url): URL-Variable "sort", Wert
+# "<spalte>" aufsteigend, "-<spalte>" absteigend. Klickfolge je Spalte:
+# aufsteigend -> absteigend -> aus (Default-Reihenfolge nach Hostname).
+_SORT_COLUMNS = ("host", "coverage")
+
+
+def _current_sort() -> str | None:
+    value = request.get_ascii_input("sort") or ""
+    return value if value.lstrip("-") in _SORT_COLUMNS else None
+
+
+def _sort_vars() -> list[tuple[str, str]]:
+    current = _current_sort()
+    return [("sort", current)] if current else []
+
+
+def _next_sort(column: str) -> str | None:
+    current = _current_sort()
+    if current == column:
+        return "-" + column
+    if current == "-" + column:
+        return None
+    return column
+
+
+def _sorted_results(results: Sequence[_HostResult]) -> list[_HostResult]:
+    current = _current_sort()
+    ordered = sorted(results, key=lambda r: r.host_name.lower())
+    if current is None:
+        return ordered
+    reverse = current.startswith("-")
+    if current.lstrip("-") == "coverage":
+        # Gleiche Coverage: Hostname aufsteigend (stabil sortiert)
+        return sorted(ordered, key=lambda r: r.coverage_pct, reverse=reverse)
+    return sorted(ordered, key=lambda r: r.host_name.lower(), reverse=reverse)
+
+
+def _sortable_th(title: str, column: str, style: str | None = None) -> None:
+    nxt = _next_sort(column)
+    url = makeuri_contextless(
+        request, [("sort", nxt)] if nxt else [], filename="monitoring_coverage_analyzer.py"
+    )
+    html.open_th(
+        class_=["sort"],
+        onclick=f"location.href={json.dumps(url)}",
+        title=_("Sort by %s") % title,
+        style=style,
+    )
+    html.write_text(title)
+    html.close_th()
+
+
 def _page_breadcrumb() -> Breadcrumb:
     """Setup > Maintenance > Analyze monitoring coverage - wie bei den
     eingebauten Maintenance-Seiten (z.B. "Analyze configuration", dort via
@@ -2384,8 +2437,9 @@ class PageMonitoringCoverageAnalyzer(Page):
             html.close_span()
             html.write_text(text)
             html.close_div()
-            # Neu laden OHNE _analyze (sonst wuerde ein neuer Lauf gestartet)
-            url = makeuri_contextless(request, [], filename="monitoring_coverage_analyzer.py")
+            # Neu laden OHNE _analyze (sonst wuerde ein neuer Lauf gestartet),
+            # Sortierung bleibt erhalten.
+            url = makeuri_contextless(request, _sort_vars(), filename="monitoring_coverage_analyzer.py")
             html.javascript(f"setTimeout(function(){{window.location.href={json.dumps(url)};}}, 5000);")
         elif state == "failed":
             # Bei abgebrochenem Prozess gibt es kein Ende -> Startzeit
@@ -2438,7 +2492,7 @@ class PageMonitoringCoverageAnalyzer(Page):
         generated_at, results = cached
 
         lookup = _RuleLookup()
-        results = _apply_rules(results, lookup)
+        results = _sorted_results(_apply_rules(results, lookup))
 
         html.h3(_("Analysis result"))
         self._show_summary(results)
@@ -2468,8 +2522,8 @@ class PageMonitoringCoverageAnalyzer(Page):
         html.th("")  # Aufklapp-Pfeil-Spalte
         # 0.9.0-b29: Status-Spalte entfaellt (Farbe der Coverage-Spalte),
         # Hostname doppelt so breit (frueher ~215 px, brach zu frueh um).
-        html.th(_("Hostname"), style="min-width:430px")
-        html.th(_("Coverage"))
+        _sortable_th(_("Hostname"), "host", style="min-width:430px")
+        _sortable_th(_("Coverage"), "coverage")
         # Abstand zum Coverage-Balken (fuellt seine Zelle bis zum Rand).
         html.th(_("Subsystems"), style="padding-left:12px")
         html.th(_("Findings"))
