@@ -1095,8 +1095,11 @@ _AGENT_PLUGIN_DIRS = (
     "local/share/check_mk/agents/windows/plugins",
 )
 # Special Agents: ausfuehrbare Datei libexec/agent_<name> je Plug-in-Paket.
+# Ab 2.5 liegt ein Teil der Plug-in-Pakete (z.B. vsphere, proxmox_ve,
+# pure_storage_fa) unter lib/python3.<x>/site-packages/cmk/plugins.
 _SPECIAL_AGENT_GLOBS = (
     "lib/python3/cmk/plugins/*/libexec/agent_*",
+    "lib/python3.*/site-packages/cmk/plugins/*/libexec/agent_*",
     "local/lib/python3/cmk_addons/plugins/*/libexec/agent_*",
 )
 
