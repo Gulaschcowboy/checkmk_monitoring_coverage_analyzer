@@ -71,6 +71,7 @@
     "proxmox": "Proxmox VE (Node)",
     "unifi": "Ubiquiti UniFi Controller",
     "veeam": "Veeam Backup & Replication",
+    "esx": "VMware vSphere VM (piggyback)",
     "checkmk": "Checkmk Agent (Self-Monitoring)",
     "zfs": "ZFS",
     "lvm": "LVM (Logical Volume Manager)",
@@ -115,6 +116,7 @@
     "proxmox": "Configure the 'Proxmox VE' special agent for this node, then run discovery.",
     "unifi": "Configure the 'UniFi' special agent, then run discovery.",
     "veeam": "Deploy the 'veeam_backup_status.ps1' agent plug-in on the backup server, then run discovery.",
+    "esx": "VMware VM detected, piggyback data missing. Configure the 'VMware ESX via vSphere' special agent for vCenter/ESXi and make sure the VM names match the host names in Checkmk, otherwise use the ruleset 'Host name translation for piggybacked hosts'.",
     "checkmk": "Ensure the Checkmk agent self-monitoring services (checkmk_agent) are discovered.",
     "zfs": "Built into the Linux agent (zfsget, needs the zfs tools) - run discovery.",
     "lvm": "Deploy the 'lvm' agent plug-in (lvm_vgs/lvm_lvs), then run discovery.",
@@ -209,6 +211,9 @@
     },
     "veeam": {
       "runtime": ["winservice:^VeeamBackupSvc$"]
+    },
+    "esx": {
+      "runtime": ["winservice:^VMTools$", "systemd:^(open-vm-tools|vmtoolsd)\\.service$"]
     }
   },
   "_comment_section_data": "A section has data if it has at least one line that is not empty, not a [subsection] header and not matching no_data_lines. section_data.<section>: additionally one data line must match the regex.",
