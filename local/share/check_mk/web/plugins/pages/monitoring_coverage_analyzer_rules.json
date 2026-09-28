@@ -261,7 +261,7 @@
   "_comment_section_ignore": "Sections that never count as evidence.",
   "section_ignore": [],
   "_comment_generic_ignore_families": "Check plug-in families never suggested by the generic match (names too common to be evidence). Families known from 'titles'/'aliases' are handled by the curated rules only.",
-  "generic_ignore_families": ["local", "win", "job", "custom", "metric", "azure"],
+  "generic_ignore_families": ["local", "win", "job", "custom", "metric", "azure", "dotnet"],
   "_comment_empty_ok": "Sections where a deployed plug-in with an empty section is a valid state (nothing to monitor), not a broken plug-in.",
   "empty_ok": ["windows_tasks"]
 }
