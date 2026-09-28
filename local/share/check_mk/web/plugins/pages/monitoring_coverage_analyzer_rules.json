@@ -34,6 +34,16 @@
     "veeam": "veeam", "veeam_backup_status": "veeam",
     "siemens_plc_counter": "siemens_plc", "siemens_plc_cpu_state": "siemens_plc", "siemens_plc_duration": "siemens_plc",
     "siemens_plc_flag": "siemens_plc", "siemens_plc_info": "siemens_plc", "siemens_plc_temp": "siemens_plc",
+    "ibm_mq": "ibm_mq", "ibm_mq_channels": "ibm_mq", "ibm_mq_managers": "ibm_mq", "ibm_mq_plugin": "ibm_mq",
+    "ibm_mq_queues": "ibm_mq",
+    "ibm_svc_array": "ibm_svc", "ibm_svc_disks": "ibm_svc", "ibm_svc_enclosure": "ibm_svc", "ibm_svc_enclosurestats_power": "ibm_svc",
+    "ibm_svc_enclosurestats_temp": "ibm_svc", "ibm_svc_eventlog": "ibm_svc", "ibm_svc_host": "ibm_svc", "ibm_svc_license": "ibm_svc",
+    "ibm_svc_mdisk": "ibm_svc", "ibm_svc_mdiskgrp": "ibm_svc", "ibm_svc_node": "ibm_svc", "ibm_svc_nodestats_cache": "ibm_svc",
+    "ibm_svc_nodestats_cpu_util": "ibm_svc", "ibm_svc_nodestats_disk_latency": "ibm_svc", "ibm_svc_nodestats_diskio": "ibm_svc", "ibm_svc_nodestats_iops": "ibm_svc",
+    "ibm_svc_portfc": "ibm_svc", "ibm_svc_portsas": "ibm_svc", "ibm_svc_system": "ibm_svc", "ibm_svc_systemstats_cache": "ibm_svc",
+    "ibm_svc_systemstats_cpu_util": "ibm_svc", "ibm_svc_systemstats_disk_latency": "ibm_svc", "ibm_svc_systemstats_diskio": "ibm_svc", "ibm_svc_systemstats_iops": "ibm_svc",
+    "domino_info": "domino", "domino_mailqueues": "domino", "domino_tasks": "domino", "domino_transactions": "domino",
+    "domino_users": "domino",
     "omreport": "dell_om", "mk_omreport": "dell_om",
     "dell_om_disks": "dell_om", "dell_om_esmlog": "dell_om", "dell_om_fans": "dell_om", 
     "dell_om_mem": "dell_om", "dell_om_power": "dell_om", "dell_om_power_unit": "dell_om", "dell_om_processors": "dell_om", "dell_om_sensors": "dell_om", "dell_om_vdisks": "dell_om",
@@ -87,6 +97,9 @@
     "smart": "S.M.A.R.T. Disk Health",
     "dell_om": "Dell OpenManage Server Administrator",
     "siemens_plc": "Siemens S7 PLC",
+    "ibm_mq": "IBM MQ",
+    "ibm_svc": "IBM Spectrum Virtualize / SVC",
+    "domino": "HCL/IBM Domino",
     "citrix_vda": "Citrix VDA (piggyback)",
     "checkmk": "Checkmk Agent (Self-Monitoring)",
     "zfs": "ZFS",
@@ -133,6 +146,8 @@
     "unifi": "Configure the 'UniFi' special agent, then run discovery.",
     "veeam": "Deploy the 'veeam_backup_status.ps1' agent plug-in on the backup server, then run discovery.",
     "citrix": "Deploy the 'citrix_farm.ps1' agent plug-in on the Delivery Controller (VDA data arrives as piggyback), then run discovery.",
+    "ibm_mq": "Deploy the 'ibm_mq' agent plug-in (Linux/Unix, needs the MQ command line tools dspmq/runmqsc), then run discovery.",
+    "domino": "Domino detected. Its checks (domino_*) use SNMP: start the Domino SNMP Agent (LNSNMP) on this server and add SNMP to the host in Checkmk, then run discovery.",
     "dell_om": "Dell OpenManage Server Administrator detected. Its hardware checks (dell_om_*) use SNMP: enable the SNMP service on this server (OMSA registers its MIB) and add SNMP to the host in Checkmk. On Linux, the 'mk_omreport' agent plug-in adds virtual disk monitoring.",
     "smart": "Deploy the 'smart_posix' agent plug-in (needs smartmontools; older: 'smart'), then run discovery.",
     "entra_connect": "Entra Connect detected. Its sync status is monitored via the 'Azure' special agent (option 'Entra Connect Sync') on the tenant host, not on this server. Configure the special agent for the tenant, then run discovery on that host.",
@@ -235,6 +250,13 @@
     },
     "citrix": {
       "runtime": ["winservice:^Citrix(Broker|Host|MachineCreation)Service$"]
+    },
+    "ibm_mq": {
+      "runtime": ["process:^amqzxma0$"],
+      "not_on_os": ["windows"]
+    },
+    "domino": {
+      "runtime": ["winservice:^(Lotus|IBM|HCL)_?Domino_?Server", "systemd:^domino\\.service$"]
     },
     "dell_om": {
       "runtime": ["systemd:^(dsm_sa_datamgrd|dsm_om_connsvc)\\.service$", "process:^dsm_(sa|om)_"]
