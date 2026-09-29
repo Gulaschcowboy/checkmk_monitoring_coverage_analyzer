@@ -420,7 +420,7 @@ def _reload_rules() -> None:
 def _rules_source_status() -> str:
     """Human-readable provenance info about the currently loaded
     findings/hint rules - directly answers the question "where does
-    this result come from": path of the JSON file, its modification time, and the
+    this result come from": modification time of the JSON file, and the
     number of loaded entries per table. There is no code fallback
     source anymore (see module docstring), hence always the same file.
     """
@@ -431,10 +431,10 @@ def _rules_source_status() -> str:
     except OSError:
         mtime_txt = "?"
     return (
-        f"{path} (last modified: {mtime_txt}; "
+        f"{mtime_txt}; "
         f"{len(ALIASES)} aliases, {len(TITLES)} titles, "
         f"{len(HINTS)} hints, {len(STOP_TOKENS)} stop-tokens, "
-        f"{len(DETECT)} detect rules loaded)"
+        f"{len(DETECT)} detect rules loaded"
     )
 
 
@@ -2517,11 +2517,11 @@ class PageMonitoringCoverageAnalyzer(Page):
         self._show_summary(results)
         age_txt = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(generated_at))
         html.p(
-            _("Result from: %s (cached until next re-run), analysis run took %s")
+            _("Last run: %s, took %s")
             % (age_txt, _format_duration(_cached_run_duration()))
         )
-        html.p(_("Findings/hints rules source: %s") % _rules_source_status())
-        rules_txt = _("Setup rule 'Monitoring coverage analysis (MCA)': %d rule(s)") % lookup.rule_count
+        html.p(_("Rule file last modified: %s") % _rules_source_status())
+        rules_txt = _("MCA setup user rules applied: %d rule(s)") % lookup.rule_count
         if lookup.error:
             rules_txt += " - " + _("error: %s") % lookup.error
         html.p(rules_txt)
