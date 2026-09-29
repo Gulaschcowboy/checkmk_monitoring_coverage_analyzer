@@ -1,6 +1,6 @@
 # Analyze monitoring coverage
 
-Checkmk extension (MKP) that finds applications and subsystems on
+Monitoring Coverage Analyzer (MCA): Checkmk extension (MKP) that finds applications and subsystems on
 agent-monitored hosts that are running but not yet monitored, and tells you
 which plug-in or special agent would cover them.
 
@@ -8,6 +8,10 @@ Requires Checkmk 2.5.0p15 or later (uses `get-agent-output ... @cached`,
 so no additional agent queries are made).
 
 ## Components
+
+"MCA" is the short name used throughout: command line tool `mcactl`,
+Setup rule and global settings. Searching for "MCA" in the Setup search
+finds the GUI page, the Setup rule and the global settings.
 
 - **GUI page** "Setup > Maintenance > Analyze monitoring coverage":
   overall coverage across all hosts, duration of the last analysis run,
@@ -19,19 +23,23 @@ so no additional agent queries are made).
 - **Piggyback service** "Checkmk Monitoring Coverage" per host
   (check plug-in `checkmk_monitoring_coverage`), fed from the cached
   analysis result.
-- **Cron script** `monitoring_coverage_analyzer_cron`:
-  - `refresh` every 5 minutes: re-sends the last result as piggyback data.
-  - `fullrun` daily at 05:00: re-runs the analysis if the configured
-    interval (Global setting, default 24 h) has elapsed.
-  - `rerun`: runs the analysis right away (used by "Re-run analysis").
-  - `refresh` and the `fullrun` due check do not load the Checkmk GUI and
-    take well under a second; only an actual analysis run does.
-- **Setup script** `monitoring_coverage_analyzer-setup`
-  (`status`, `uninstall`): installs the cron jobs. MKPs cannot register
-  cron jobs themselves, so run it once after installing or updating.
+- **Command line tool** `mcactl` (run as the site user):
+  - `setup`: installs or updates the cron jobs. MKPs cannot register cron
+    jobs themselves, so run it once after installing or updating.
+  - `status`: shows the cron jobs and the time of the last runs.
+  - `uninstall`: removes the cron jobs.
+  - `refresh` (cron, every 5 minutes): re-sends the last result as
+    piggyback data.
+  - `fullrun` (cron, daily at 05:00): re-runs the analysis if the
+    configured interval (Global setting, default 24 h) has elapsed.
+  - `rerun`: runs the analysis right away (also used by "Re-run
+    analysis").
+  - `refresh`, `status` and the `fullrun` due check do not load the
+    Checkmk GUI and take well under a second; only an actual analysis run
+    does.
 - **Rules file** `monitoring_coverage_analyzer_rules.json`: aliases,
   titles, hints and detection rules. Can be adjusted without code changes.
-- **Setup rule** "Monitoring coverage analysis" (Setup > Services >
+- **Setup rule** "Monitoring coverage analysis (MCA)" (Setup > Services >
   Service monitoring rules): ignore findings (false positives or accepted
   gaps) by regular expressions on subsystem, check plug-in and evidence,
   and disable the fuzzy search for potential check candidates (or show its
@@ -85,7 +93,7 @@ run (`not_on_os`).
 ```
 mkp add monitoring_coverage_analyzer-<version>.mkp
 mkp enable monitoring_coverage_analyzer <version>
-monitoring_coverage_analyzer-setup
+mcactl setup
 omd restart apache
 ```
 
@@ -104,7 +112,7 @@ incomplete" finding instead of a result.
 ## Repository layout
 
 ```
-local/bin/                                   cron + setup scripts
+local/bin/                                   mcactl (setup + cron tool)
 local/lib/python3/cmk_addons/plugins/...     check plug-in, Setup rule,
                                              shared evaluation (lib/)
 local/share/check_mk/web/plugins/pages/      GUI page + rules file

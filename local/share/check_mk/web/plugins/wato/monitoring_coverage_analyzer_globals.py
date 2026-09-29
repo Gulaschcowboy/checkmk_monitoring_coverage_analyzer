@@ -52,7 +52,7 @@ from cmk.gui.watolib.config_domain_name import (
 from cmk.gui.watolib.config_domains import ConfigDomainGUI
 
 ConfigVariableGroupMonitoringCoverageAnalyzer = ConfigVariableGroup(
-    title=_("Monitoring Coverage Analyzer"),
+    title=_("Monitoring Coverage Analyzer (MCA)"),
     sort_index=105,
 )
 config_variable_group_registry.register(ConfigVariableGroupMonitoringCoverageAnalyzer)
@@ -60,7 +60,7 @@ config_variable_group_registry.register(ConfigVariableGroupMonitoringCoverageAna
 
 def _valuespec_generate_piggyback_data(_context: GlobalSettingsContext) -> Checkbox:
     return Checkbox(
-        title=_("Generate per-host piggyback data"),
+        title=_("Generate per-host piggyback data (MCA)"),
         label=_("Generate piggyback data for the 'Checkmk Monitoring Coverage' service"),
         help=_(
             "If enabled, every full analysis run additionally writes a "
@@ -88,12 +88,12 @@ def _valuespec_piggyback_interval_hours(_context: GlobalSettingsContext) -> Inte
     # return) - avoids a silent seconds/hours mix-up in later consumer
     # code (_query_and_analyze_hosts() callers).
     return Integer(
-        title=_("Full analysis run interval (hours)"),
+        title=_("Full analysis run interval in hours (MCA)"),
         help=_(
             "Minimum time (in hours) between two REAL full analysis runs "
             "(Livestatus query + rule evaluation, producing new content). "
             "The full run is checked once a day at 05:00 (cron job "
-            "installed by monitoring_coverage_analyzer-setup), so the "
+            "installed by 'mcactl setup'), so the "
             "effective granularity is whole days: 24 = daily, 48 = every "
             "second day; values below 24 behave like 24. "
             "Between full runs, a lightweight refresh tick (every 5 "

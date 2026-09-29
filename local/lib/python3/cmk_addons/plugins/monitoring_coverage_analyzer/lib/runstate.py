@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run state of monitoring_coverage_analyzer WITHOUT the Checkmk GUI.
 
-Everything the cron script needs for the frequent, fast paths
+Everything mcactl needs for the frequent, fast paths
 (piggyback refresh every 5 min, check "full run due?"), plus the state
 of the background analysis run. Deliberately without cmk.gui imports:
 starting up the GUI (main_modules.register) takes 3-20 s depending on the
@@ -36,7 +36,7 @@ _CACHE_LOCK_NAME = "monitoring_coverage_analyzer_cache.lock"
 _JOB_LOCK_NAME = "monitoring_coverage_analyzer_job.lock"
 _JOB_STATE_NAME = "monitoring_coverage_analyzer_job.json"
 _JOB_LOG_REL = os.path.join("var", "log", "monitoring_coverage_analyzer.log")
-CRON_SCRIPT_REL = os.path.join("local", "bin", "monitoring_coverage_analyzer_cron")
+CRON_SCRIPT_REL = os.path.join("local", "bin", "mcactl")
 
 # The fullrun cron runs once a day. last_full_run_timestamp is only set at
 # the END of a run - without a grace period, the run on the following day at
@@ -117,6 +117,51 @@ def piggyback_interval_hours() -> int:
         return int(global_setting("piggyback_interval_hours"))
     except (TypeError, ValueError):
         return int(_GLOBAL_DEFAULTS["piggyback_interval_hours"])
+
+
+# ---------------------------------------------------------------------------
+# Cron jobs (installed by "mcactl setup")
+# ---------------------------------------------------------------------------
+
+_CRON_FILE_REL = os.path.join("etc", "cron.d", "monitoring_coverage_analyzer")
+# PackagePart.DOC installs to local/share/doc/check_mk/ (cmk.utils.paths.local_doc_dir)
+_CRON_TEMPLATE_REL = os.path.join(
+    "local", "share", "doc", "check_mk", "monitoring_coverage_analyzer",
+    "monitoring_coverage_analyzer.cron",
+)
+
+
+def cron_problem() -> str | None:
+    """Returns why the cron jobs are not active, or None if they are.
+    Checks the cron file against the template shipped in the MKP and the
+    active site crontab (the file only takes effect after 'omd reload
+    crontab')."""
+    root = omd_root()
+    if not root:
+        return None
+    cron_file = os.path.join(root, _CRON_FILE_REL)
+    try:
+        with open(cron_file, "rb") as handle:
+            current = handle.read()
+    except OSError:
+        return "the cron jobs are not installed"
+    try:
+        with open(os.path.join(root, _CRON_TEMPLATE_REL), "rb") as handle:
+            if handle.read() != current:
+                return "the installed cron jobs are outdated (they differ from this package version)"
+    except OSError:
+        pass
+    try:
+        out = subprocess.run(
+            ["crontab", "-l"], capture_output=True, text=True, timeout=5, check=False
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None  # cannot check - do not warn
+    if not any(
+        "mcactl " in line for line in out.splitlines() if not line.lstrip().startswith("#")
+    ):
+        return "the cron jobs are not active in the site crontab"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +473,7 @@ def save_job_state(**fields: Any) -> None:
 
 def start_background_rerun() -> tuple[bool, str]:
     """Starts an analysis run as a separate process outside of Apache
-    (cron script, mode "rerun"). Returns: (started, message)."""
+    (mcactl, command "rerun"). Returns: (started, message)."""
     if job_running():
         return False, "already running"
     root = omd_root()

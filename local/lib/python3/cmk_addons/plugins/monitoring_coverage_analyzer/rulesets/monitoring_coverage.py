@@ -122,7 +122,7 @@ def _parameter_form() -> Dictionary:
 
 rule_spec_monitoring_coverage_analyzer = CheckParameters(
     name="checkmk_monitoring_coverage",
-    title=Title("Monitoring coverage analysis"),
+    title=Title("Monitoring coverage analysis (MCA)"),
     topic=Topic.GENERAL,
     parameter_form=_parameter_form,
     condition=HostCondition(),

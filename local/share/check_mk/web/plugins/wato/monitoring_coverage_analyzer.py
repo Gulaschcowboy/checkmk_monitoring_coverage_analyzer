@@ -16,6 +16,7 @@ the value is interpreted as a direct URL instead of wato.py?mode=....
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import override
 
 from cmk.gui.i18n import _
@@ -71,6 +72,12 @@ class MainModuleMonitoringCoverageAnalyzer(ABCMainModule):
     @override
     def is_show_more(self) -> bool:
         return False
+
+    @classmethod
+    @override
+    def main_menu_search_terms(cls) -> Sequence[str]:
+        # Additional match texts for the Setup search: short name "MCA".
+        return ["MCA", "Monitoring Coverage Analyzer"]
 
 
 main_module_registry.register(MainModuleMonitoringCoverageAnalyzer)

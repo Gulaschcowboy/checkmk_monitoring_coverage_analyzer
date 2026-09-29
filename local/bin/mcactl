@@ -1,0 +1,302 @@
+#!/usr/bin/env python3
+"""mcactl - control tool of the Monitoring Coverage Analyzer (MCA).
+
+Run as the OMD site user:
+
+    mcactl setup       install / update the cron jobs (once after install or update)
+    mcactl status      show cron jobs and the state of the last runs
+    mcactl uninstall   remove the cron jobs
+    mcactl fullrun     run the analysis if the configured interval has elapsed (cron, daily)
+    mcactl rerun       run the analysis right away (also started by the GUI page)
+    mcactl refresh     re-send the last result as piggyback data (cron, every 5 min)
+"""
+# MKPs cannot register cron jobs themselves (etc/cron.d/ is not a
+# PackagePart), hence "setup" copies the cron template shipped in the MKP.
+#
+# refresh, status and the "fullrun due?" check run WITHOUT the Checkmk GUI
+# (lib/runstate.py). Starting the GUI (main_modules.register) takes 3-20 s
+# depending on the system and is only needed for an actual analysis run.
+from __future__ import annotations
+
+import filecmp
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import traceback
+
+PKG = "monitoring_coverage_analyzer"
+TOOL = "mcactl"
+ANALYSIS_MODES = ("fullrun", "rerun")
+COMMANDS = ("setup", "status", "uninstall", "fullrun", "rerun", "refresh")
+
+_TTY = sys.stdout.isatty()
+
+
+def _c(code: str, text: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if _TTY else text
+
+
+def step(msg: str) -> None:
+    print("  " + _c("1", f"> {msg}"))
+
+
+def ok(msg: str) -> None:
+    print("  " + _c("0;32", f"OK   {msg}"))
+
+
+def warn(msg: str) -> None:
+    print("  " + _c("0;33", f"WARN {msg}"))
+
+
+def die(msg: str) -> int:
+    print("\n" + _c("0;31", f"Error: {msg}") + "\n", file=sys.stderr)
+    return 1
+
+
+def _paths(root: str) -> dict[str, str]:
+    return {
+        # PackagePart.DOC installs to local/share/doc/check_mk/ (cmk.utils.paths.local_doc_dir)
+        "template": os.path.join(root, "local", "share", "doc", "check_mk", PKG, f"{PKG}.cron"),
+        "cron_file": os.path.join(root, "etc", "cron.d", PKG),
+        "tool": os.path.join(root, "local", "bin", TOOL),
+        "cache": os.path.join(root, "var", "check_mk", "web", f"{PKG}_cache.json"),
+    }
+
+
+def _cron_active() -> bool:
+    try:
+        out = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False).stdout
+    except OSError:
+        return False
+    return any(
+        f"{TOOL} " in line for line in out.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+def _reload_crontab() -> None:
+    subprocess.run(["omd", "reload", "crontab"], stdout=subprocess.DEVNULL, check=False)
+
+
+def _header(title: str, site: str, root: str) -> None:
+    print()
+    print(_c("1", f"Monitoring Coverage Analyzer (MCA) - {title}"))
+    print(f"  Site: {site}  ({root})")
+    print()
+
+
+# ---------------------------------------------------------------------------
+# setup / status / uninstall
+# ---------------------------------------------------------------------------
+
+
+def cmd_setup(site: str, root: str) -> int:
+    p = _paths(root)
+    if not os.path.isfile(p["template"]):
+        return die(f"Cron template not found at {p['template']}\nDid you install the {PKG} MKP first?")
+    if not os.access(p["tool"], os.X_OK):
+        return die(f"{TOOL} not found/executable at {p['tool']}\nDid you install the {PKG} MKP first?")
+    _header("Setup", site, root)
+
+    step("Installing cron jobs")
+    cron_file = p["cron_file"]
+    os.makedirs(os.path.dirname(cron_file), exist_ok=True)
+    if os.path.isfile(cron_file) and filecmp.cmp(p["template"], cron_file, shallow=False):
+        ok(f"{cron_file} already up to date")
+    else:
+        # Atomic replace: stage next to the target, then rename().
+        fd, tmp = tempfile.mkstemp(prefix=os.path.basename(cron_file) + ".", dir=os.path.dirname(cron_file))
+        os.close(fd)
+        shutil.copyfile(p["template"], tmp)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, cron_file)
+        ok(f"{cron_file} written")
+
+    step("Reloading site crontab")
+    _reload_crontab()
+    if not _cron_active():
+        return die(
+            "Cron jobs not found in the site crontab after 'omd reload crontab'.\n"
+            "Is the crontab service enabled? (omd config show CRONTAB)"
+        )
+    ok("Cron jobs active")
+
+    print()
+    print(_c("0;32;1", "  Setup complete."))
+    print()
+    print("  Jobs:")
+    with open(cron_file, encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip() and not line.lstrip().startswith("#"):
+                print("    " + line.rstrip())
+    print()
+    print("  The full analysis runs daily at 05:00 (if due).")
+    print("  To run it right away:")
+    print(f"    {TOOL} rerun")
+    print()
+    return 0
+
+
+def cmd_status(site: str, root: str) -> int:
+    p = _paths(root)
+    _header("Status", site, root)
+    if os.path.isfile(p["cron_file"]):
+        ok(f"Cron file present: {p['cron_file']}")
+        if os.path.isfile(p["template"]) and not filecmp.cmp(p["template"], p["cron_file"], shallow=False):
+            warn(f"Cron file differs from the MKP template - run: {TOOL} setup")
+    else:
+        warn(f"Cron file missing - run: {TOOL} setup")
+    if _cron_active():
+        ok("Cron jobs active in site crontab")
+    else:
+        warn("Cron jobs NOT active in site crontab")
+    try:
+        with open(p["cache"], encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        warn(f"No analysis result yet ({p['cache']})")
+    else:
+        def fmt(ts: object) -> str:
+            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(ts))) if ts else "never"
+
+        print("  Last full run:               ", fmt(data.get("last_full_run_timestamp")))
+        print("  Last piggyback refresh:      ", fmt(data.get("last_piggyback_refresh_timestamp")))
+    print()
+    return 0
+
+
+def cmd_uninstall(site: str, root: str) -> int:
+    p = _paths(root)
+    _header("Uninstall cron jobs", site, root)
+    step("Removing cron jobs")
+    try:
+        os.remove(p["cron_file"])
+    except FileNotFoundError:
+        pass
+    _reload_crontab()
+    if _cron_active():
+        return die("Cron jobs still present in the site crontab.")
+    ok("Cron jobs removed")
+    print()
+    print("  " + _c("0;33;1", "Next step (optional): remove the MKP package:"))
+    print(f"    mkp disable {PKG}")
+    print(f"    mkp remove {PKG}")
+    print()
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# refresh / fullrun / rerun
+# ---------------------------------------------------------------------------
+
+
+def _run_analysis() -> tuple[int, int, str | None]:
+    """Loads the GUI and the page module and runs a complete analysis
+    (including saving the result and writing piggyback data)."""
+    # main_modules.register() must run before application_and_request_context()
+    # (otherwise KeyError in features_registry) - same call as in
+    # cmk-update-config.
+    from cmk.ccc.version import edition
+    from cmk.gui import main_modules
+    from cmk.utils import paths as cmk_paths
+
+    main_modules.register(edition(cmk_paths.omd_root))
+
+    from cmk.gui.utils.script_helpers import application_and_request_context
+
+    with application_and_request_context():
+        # Page plug-ins are loaded by the GUI via exec() and are not
+        # importable - hence load them directly via the file path.
+        import importlib.util
+        from pathlib import Path
+
+        plugin_path = Path(cmk_paths.local_web_dir) / "plugins" / "pages" / f"{PKG}.py"
+        spec = importlib.util.spec_from_file_location(f"{PKG}_page_module", plugin_path)
+        if spec is None or spec.loader is None:  # pragma: no cover - defensive
+            raise RuntimeError(f"cannot load GUI page module {plugin_path}")
+        page_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(page_module)
+        return page_module._run_analysis_and_store()
+
+
+def _analysis_job(runstate, mode: str) -> int:
+    with runstate.job_lock() as acquired:
+        if not acquired:
+            print(f"{mode}: skipped, another analysis run is active")
+            return 0
+        started = time.time()
+        runstate.save_job_state(state="running", mode=mode, started=started, finished=None, error=None)
+        try:
+            hosts, written, error = _run_analysis()
+        except Exception as exc:  # record the error for the GUI page
+            traceback.print_exc()
+            runstate.save_job_state(state="failed", finished=time.time(), error=f"{exc!r}")
+            return 1
+        runstate.save_job_state(
+            state="done" if error is None else "failed",
+            finished=time.time(),
+            hosts=hosts,
+            error=None if error is None else f"piggyback: {error}",
+        )
+        print(
+            f"{mode}: hosts={hosts} piggyback_written={written} error={error} "
+            f"duration={time.time() - started:.1f}s"
+        )
+        return 0 if error is None else 1
+
+
+def cmd_refresh() -> int:
+    from cmk_addons.plugins.monitoring_coverage_analyzer.lib import runstate
+
+    written, error = runstate.run_piggyback_refresh()
+    print(f"refresh: written={written} error={error}")
+    return 0 if error is None else 1
+
+
+def cmd_analysis(mode: str) -> int:
+    from cmk_addons.plugins.monitoring_coverage_analyzer.lib import runstate
+
+    if mode == "fullrun":
+        due, reason = runstate.is_full_run_due(force=False)
+        if not due:
+            print(f"fullrun: skipped, not due ({reason})")
+            return 0
+    return _analysis_job(runstate, mode)
+
+
+def usage(stream=sys.stdout) -> None:
+    print((__doc__ or "").strip(), file=stream)
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) == 2 and argv[1] in ("-h", "--help", "help"):
+        usage()
+        return 0
+    if len(argv) != 2 or argv[1] not in COMMANDS:
+        usage(sys.stderr)
+        return 2
+    cmd = argv[1]
+
+    site = os.environ.get("OMD_SITE", "")
+    root = os.environ.get("OMD_ROOT", "")
+    if not site or not root:
+        return die(f"Run as the OMD site user (OMD_SITE / OMD_ROOT must be set).\nExample: su - <SITE> -c '{TOOL} {cmd}'")
+    if os.getuid() == 0:
+        return die(f"Do not run as root. Example: su - {site} -c '{TOOL} {cmd}'")
+
+    if cmd == "setup":
+        return cmd_setup(site, root)
+    if cmd == "status":
+        return cmd_status(site, root)
+    if cmd == "uninstall":
+        return cmd_uninstall(site, root)
+    if cmd == "refresh":
+        return cmd_refresh()
+    return cmd_analysis(cmd)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

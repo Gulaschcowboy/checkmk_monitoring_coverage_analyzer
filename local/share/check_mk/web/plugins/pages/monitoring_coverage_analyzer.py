@@ -99,7 +99,7 @@ PLAN_piggyback_background_job.md - all decisions there are final):
     Invocation path: both endpoints are triggered PRAGMATICALLY via a direct
     Python call in the site context (cmk.gui.utils.
     script_helpers.application_and_request_context(), see
-    local/bin/monitoring_coverage_analyzer_cron - analogous to
+    local/bin/mcactl - analogous to
     Checkmk's own CLI scripts such as cmk-update-config), NOT via an
     authenticated HTTP request: for a pure cron trigger this is
     simpler/more robust than an automation-user-secret solution
@@ -108,7 +108,7 @@ PLAN_piggyback_background_job.md - all decisions there are final):
     simpler, cleaner way exists ... prefer that"). The GET
     parameter mechanism in this file remains nevertheless (also
     usable via a real HTTP request, e.g. for manual tests via curl
-    with a GUI session cookie), only the bundled cron script uses the
+    with a GUI session cookie), only the bundled mcactl uses the
     direct Python path.
   - The "Re-run analysis" button still immediately triggers a real full run
     AND afterwards (if generate_piggyback_data is enabled) immediately
@@ -2021,7 +2021,7 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
 
 
 # 0.9.0-b25: Cache file, piggyback writing and run state live in
-# lib/runstate.py (without GUI imports) - the cron script uses them for the
+# lib/runstate.py (without GUI imports) - mcactl uses them for the
 # fast paths without starting up the GUI. Only thin adapters to
 # _HostResult here.
 
@@ -2113,7 +2113,7 @@ def _run_piggyback_refresh() -> tuple[int, str | None]:
 
 def _run_analysis_and_store() -> tuple[int, int, str | None]:
     """Complete analysis run incl. storing (and piggyback, if enabled).
-    Called by the cron script (fullrun/rerun), no longer from the Apache
+    Called by mcactl (fullrun/rerun), no longer from the Apache
     request. Returns: (hosts, piggyback written, error)."""
     results = _query_and_analyze_hosts()
     if _generate_piggyback_data_enabled():
@@ -2330,7 +2330,7 @@ class PageMonitoringCoverageAnalyzer(Page):
         # response instead of HTML (analogous to Checkmk's own
         # automation/Ajax endpoints) - this keeps the endpoint usable both
         # via a direct Python call in the site context (see local/bin/
-        # monitoring_coverage_analyzer_cron) and via a real authenticated
+        # mcactl) and via a real authenticated
         # HTTP GET (e.g. curl with a GUI session cookie, for manual tests).
         if ctx.request.has_var("_cron_refresh"):
             written, error = _run_piggyback_refresh()
@@ -2354,6 +2354,7 @@ class PageMonitoringCoverageAnalyzer(Page):
             return None
 
         make_header(html, PAGE_TITLE, _page_breadcrumb())
+        self._show_cron_warning()
 
         # 0.9.0-b15: visible feedback while the re-run is in progress - the
         # analysis is synchronous (page only responds after the run, approx.
@@ -2396,7 +2397,7 @@ class PageMonitoringCoverageAnalyzer(Page):
         html.end_form()
 
         # 0.9.0-b25: "Re-run analysis" starts the analysis as a separate
-        # process outside of Apache (cron script, mode "rerun") - with
+        # process outside of Apache (mcactl, command "rerun") - with
         # many hosts or slow systems it takes longer than the Apache
         # timeout. The page shows the progress and reloads until the run
         # has finished.
@@ -2409,6 +2410,27 @@ class PageMonitoringCoverageAnalyzer(Page):
         self._show_job_status(start_message)
         self._show_results()
         return None
+
+    def _show_cron_warning(self) -> None:
+        """Yellow warning box if the cron jobs of "mcactl setup" are missing,
+        outdated or not active in the site crontab."""
+        problem = _rs.cron_problem()
+        if problem is None:
+            return
+        html.show_warning(
+            HTML.with_escaping(
+                _(
+                    "The cron jobs of the Monitoring Coverage Analyzer (MCA) are not "
+                    "set up correctly: %s. Without them, the daily full analysis run and the "
+                    "piggyback refresh every 5 minutes do not take place, and the "
+                    "'Checkmk Monitoring Coverage' services become stale."
+                )
+                % problem
+            )
+            + HTML.without_escaping("<br>")
+            + HTML.with_escaping(_("Run once as the site user:"))
+            + HTML.without_escaping(" <tt>mcactl setup</tt>")
+        )
 
     def _show_job_status(self, start_message: str | None) -> None:
         status = _rs.job_status()
@@ -2496,7 +2518,7 @@ class PageMonitoringCoverageAnalyzer(Page):
             % (age_txt, _format_duration(_cached_run_duration()))
         )
         html.p(_("Findings/hints rules source: %s") % _rules_source_status())
-        rules_txt = _("Setup rule 'Monitoring coverage analysis': %d rule(s)") % lookup.rule_count
+        rules_txt = _("Setup rule 'Monitoring coverage analysis (MCA)': %d rule(s)") % lookup.rule_count
         if lookup.error:
             rules_txt += " - " + _("error: %s") % lookup.error
         html.p(rules_txt)
