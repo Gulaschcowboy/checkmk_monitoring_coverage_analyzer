@@ -1,28 +1,28 @@
-# Default-Werte fuer die beiden globalen Optionen aus
+# Default values for the two global options from
 # plugins/wato/monitoring_coverage_analyzer_globals.py.
 #
-# Checkmk liest Default-Werte fuer ConfigVariable-Eintraege NICHT aus der
-# ConfigVariable selbst, sondern aus dem "config"-Legacy-Plugin-Namespace
-# (siehe cmk.gui.config._get_default_config_from_legacy_plugins() ->
-# utils.load_web_plugins("config", default_config) - live auf
-# Test-Site/Checkmk 2.5.0p12 Ultimate per grep verifiziert): jedes
-# Modul-Attribut hier mit demselben Namen wie ein ConfigVariable-ident
-# wird zum Default-Wert dieser Variable, solange sie noch nicht explizit
-# in multisite.mk/multisite.d/*.mk gesetzt wurde.
+# Checkmk does NOT read default values for ConfigVariable entries from the
+# ConfigVariable itself, but from the "config" legacy plugin namespace
+# (see cmk.gui.config._get_default_config_from_legacy_plugins() ->
+# utils.load_web_plugins("config", default_config) - verified live via grep
+# on the test site/Checkmk 2.5.0p12 Ultimate): every module attribute here
+# with the same name as a ConfigVariable ident becomes the default value
+# of that variable, as long as it has not been set explicitly in
+# multisite.mk/multisite.d/*.mk.
 #
-# WICHTIGER FALLSTRICK (live auf der Test-Site entdeckt und verifiziert):
-# load_web_plugins("config", default_config) fuehrt diese Datei per
-# exec(compile(...), default_config) aus, d.h. JEDES Modul-Attribut
-# landet als Schluessel in default_config - inklusive eines
-# Modul-DOCSTRINGS, der als "__doc__"-Eintrag zum vermeintlichen
-# "custom config key" wird! cmk.gui.config.make_config_object() baut
-# daraufhin per dataclasses.make_dataclass() eine "ExtendedConfig"-Klasse
-# mit einem Feld "__doc__" - was mit
+# IMPORTANT PITFALL (discovered and verified live on the test site):
+# load_web_plugins("config", default_config) executes this file via
+# exec(compile(...), default_config), i.e. EVERY module attribute ends up
+# as a key in default_config - including a module DOCSTRING, which turns
+# into a supposed "custom config key" as a "__doc__" entry!
+# cmk.gui.config.make_config_object() then builds an "ExtendedConfig"
+# class via dataclasses.make_dataclass() with a field "__doc__" - which
+# crashes with
 # "TypeError: cannot delete '__doc__' attribute of immutable type
-# 'ExtendedConfig'" abstuerzt (dataclasses.py versucht das automatisch
-# vom class-Objekt geerbte __doc__-Attribut zu ueberschreiben, was bei
-# einem per make_dataclass() erzeugten Typ nicht erlaubt ist). Deshalb
-# bewusst KEIN Modul-Docstring in dieser Datei, nur normale Kommentare.
+# 'ExtendedConfig'" (dataclasses.py tries to overwrite the __doc__
+# attribute automatically inherited from the class object, which is not
+# allowed for a type created via make_dataclass()). Therefore there is
+# deliberately NO module docstring in this file, only regular comments.
 from __future__ import annotations
 
 generate_piggyback_data = True

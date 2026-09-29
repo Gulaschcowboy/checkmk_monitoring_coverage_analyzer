@@ -5,15 +5,15 @@
     monitoring_coverage_analyzer_cron fullrun   # daily
     monitoring_coverage_analyzer_cron rerun     # started by the GUI page
 """
-# refresh: schreibt das letzte Ergebnis erneut als Piggyback-Daten.
-# fullrun: neue Analyse, wenn piggyback_interval_hours abgelaufen ist.
-# rerun:   neue Analyse sofort ("Re-run analysis" auf der GUI-Seite, laeuft
-#          als eigener Prozess ausserhalb von Apache).
+# refresh: rewrites the last result as piggyback data.
+# fullrun: new analysis if piggyback_interval_hours has elapsed.
+# rerun:   new analysis immediately ("Re-run analysis" on the GUI page, runs
+#          as a separate process outside of Apache).
 #
-# 0.9.0-b25: refresh und die Pruefung "fullrun faellig?" laufen OHNE die
-# Checkmk-GUI (lib/runstate.py). Das Hochfahren der GUI
-# (main_modules.register) kostet je nach System 3-20 s und wird nur noch
-# fuer einen echten Analyse-Lauf gebraucht.
+# 0.9.0-b25: refresh and the check "fullrun due?" run WITHOUT the
+# Checkmk GUI (lib/runstate.py). Starting up the GUI
+# (main_modules.register) takes 3-20 s depending on the system and is only
+# needed for an actual analysis run.
 from __future__ import annotations
 
 import sys
@@ -24,10 +24,10 @@ MODES = ("refresh", "fullrun", "rerun")
 
 
 def _run_analysis() -> tuple[int, int, str | None]:
-    """Laedt die GUI und das Seitenmodul und fuehrt einen kompletten
-    Analyse-Lauf aus (inkl. Speichern und Piggyback)."""
-    # main_modules.register() muss vor application_and_request_context()
-    # laufen (sonst KeyError im features_registry) - derselbe Aufruf wie in
+    """Loads the GUI and the page module and performs a complete
+    analysis run (incl. storing and piggyback)."""
+    # main_modules.register() must run before application_and_request_context()
+    # (otherwise KeyError in features_registry) - the same call as in
     # cmk-update-config.
     from cmk.ccc.version import edition
     from cmk.gui import main_modules
@@ -38,8 +38,8 @@ def _run_analysis() -> tuple[int, int, str | None]:
     from cmk.gui.utils.script_helpers import application_and_request_context
 
     with application_and_request_context():
-        # Page-Plugins werden von der GUI per exec() geladen und sind nicht
-        # importierbar - daher direkt ueber den Dateipfad laden.
+        # Page plugins are loaded by the GUI via exec() and are not
+        # importable - so load directly via the file path.
         import importlib.util
         from pathlib import Path
 
@@ -49,7 +49,7 @@ def _run_analysis() -> tuple[int, int, str | None]:
         spec = importlib.util.spec_from_file_location(
             "monitoring_coverage_analyzer_page_module", plugin_path
         )
-        if spec is None or spec.loader is None:  # pragma: no cover - defensiv
+        if spec is None or spec.loader is None:  # pragma: no cover - defensive
             raise RuntimeError(f"cannot load GUI page module {plugin_path}")
         page_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(page_module)
@@ -65,7 +65,7 @@ def _analysis_job(runstate, mode: str) -> int:
         runstate.save_job_state(state="running", mode=mode, started=started, finished=None, error=None)
         try:
             hosts, written, error = _run_analysis()
-        except Exception as exc:  # Fehler fuer die GUI-Seite festhalten
+        except Exception as exc:  # record the error for the GUI page
             traceback.print_exc()
             runstate.save_job_state(state="failed", finished=time.time(), error=f"{exc!r}")
             return 1

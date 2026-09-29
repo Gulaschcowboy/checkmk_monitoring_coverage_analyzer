@@ -6,114 +6,114 @@ the same mechanism used by cmk.gui.utils.plugins.register() ->
 utils.load_web_plugins("pages", globals()). Registration happens as an
 import-time side effect (page_registry.register(...) at module level).
 
-Ausbaustufe 1.3.0 (vs. 1.2.0 PoC):
-  UI-Politur (Schritt 1):
-  - Status-Zelle nutzt jetzt exakt dieselbe CSS-Klasse wie die normale
-    Checkmk Service-Tabelle: "state svcstate state0/1/2" (siehe
+Expansion stage 1.3.0 (vs. 1.2.0 PoC):
+  UI polish (step 1):
+  - The status cell now uses exactly the same CSS class as the regular
+    Checkmk service table: "state svcstate state0/1/2" (see
     lib/python3/cmk/gui/bi/view.py: 'classes = "state svcstate state%s" %
-    state["state"]' - live im System per grep nachgeschlagen, nicht
-    geraten). OK=state0 (gruen), WARN=state1 (gelb), CRIT=state2 (rot) -
-    das Farbschema kommt automatisch aus dem aktiven Checkmk-Theme
-    (facelift/modern-dark), keine eigene Farbdefinition noetig.
-  - Hostname ist jetzt ein Link auf die eingebaute "host"-View
-    (view.py?view_name=host&host=<hostname>), erzeugt per
+    state["state"]' - looked up live on the system via grep, not
+    guessed). OK=state0 (green), WARN=state1 (yellow), CRIT=state2 (red) -
+    the color scheme comes automatically from the active Checkmk theme
+    (facelift/modern-dark), no custom color definition needed.
+  - The hostname is now a link to the built-in "host" view
+    (view.py?view_name=host&host=<hostname>), generated via
     cmk.gui.utils.urls.makeuri_contextless(request, [("view_name",
-    "host"), ("host", host_name)], filename="view.py") - dieselbe
-    Konvention, die Checkmk-eigene Painter fuer Host-Links verwenden.
-  - Coverage-Zelle bekommt einen Perf-o-Meter-artigen Balken per inline
-    CSS linear-gradient() im style-Attribut der <td>: gefuellter Anteil
-    entspricht coverage_pct, Farbe gruen (>=80%), gelb (>=50%), rot
-    (<50%) - vereinfachtes Ampel-Schema, nicht pixelgenau wie das
-    Original-Perf-o-Meter, aber optisch klar als Balken erkennbar.
+    "host"), ("host", host_name)], filename="view.py") - the same
+    convention that Checkmk's own painters use for host links.
+  - The coverage cell gets a Perf-o-Meter-like bar via inline
+    CSS linear-gradient() in the style attribute of the <td>: the filled share
+    corresponds to coverage_pct, color green (>=80%), yellow (>=50%), red
+    (<50%) - simplified traffic-light scheme, not pixel-exact like the
+    original Perf-o-Meter, but visually clearly recognizable as a bar.
 
-  Ergebnis-Caching (Schritt 2):
-  - Das Analyse-Ergebnis wird nach jedem Lauf als einfache JSON-Datei
-    unter var/check_mk/web/monitoring_coverage_analyzer_cache.json
-    (OMD_ROOT-relativ, siehe _cache_path()) abgelegt (atomarer Rename via
-    os.replace(), robust gg. gleichzeitige Worker-Prozesse) und beim
-    naechsten Seitenaufruf wieder eingelesen - persistiert also ueber
-    mehrere Apache/CMK-GUI-Worker-Prozesse hinweg (kein reiner
-    In-Memory-Cache). Bewusst per json.dump()/json.load() statt
-    cmk.ccc.store.save_object_to_file()/load_object_from_file()
-    nachgebaut (deren Existenz live auf der Test-Site verifiziert wurde,
-    siehe Recherche-Notiz unten), um keine harte Abhaengigkeit von
-    internen cmk.*-Modulpfaden einzugehen, die sich zwischen
-    Checkmk-Versionen verschieben koennen - fachlich aequivalent
-    (atomares Schreiben + einfaches Lesen einer JSON-Datei unterhalb
-    von var/check_mk/web/, der GUI-eigenen Datenablage).
-  - Existiert beim Betreten der Seite noch kein Cache, wird die Analyse
-    automatisch einmal ausgefuehrt (kein Leerzustand mehr).
-  - Der Knopf heisst jetzt "Re-run analysis" (statt "Start analysis
-    now"): passender, weil die Seite ab jetzt IMMER ein (ggf.
-    zwischengespeichertes) Ergebnis zeigt und der Knopf nur noch fuer
-    das explizite Neu-Berechnen gebraucht wird.
+  Result caching (step 2):
+  - After each run the analysis result is stored as a simple JSON file
+    under var/check_mk/web/monitoring_coverage_analyzer_cache.json
+    (relative to OMD_ROOT, see _cache_path()) (atomic rename via
+    os.replace(), robust against concurrent worker processes) and read
+    back on the next page load - so it persists across
+    multiple Apache/CMK GUI worker processes (not a pure
+    in-memory cache). Deliberately re-implemented with json.dump()/json.load()
+    instead of cmk.ccc.store.save_object_to_file()/load_object_from_file()
+    (whose existence was verified live on the test site,
+    see research note below), to avoid a hard dependency on
+    internal cmk.* module paths that may move between
+    Checkmk versions - functionally equivalent
+    (atomic write + simple read of a JSON file below
+    var/check_mk/web/, the GUI's own data storage).
+  - If no cache exists yet when the page is opened, the analysis is
+    run automatically once (no more empty state).
+  - The button is now called "Re-run analysis" (instead of "Start analysis
+    now"): more fitting, because from now on the page ALWAYS shows a (possibly
+    cached) result and the button is only needed for
+    explicit recomputation.
 
-  Belege (seit 0.9.0-b14, siehe _analyze_host()):
-  - Direkt aus der Agent-Ausgabe (get-agent-output @cached): Sections,
-    deren Name auf ein Token abbildet und die echte Daten liefern
-    (T_SECTION), die Plug-in-Liste checkmk_agent_plugins_lnx/_win
-    (T_PLUGIN) und laufende Dienste/Prozesse aus systemd_units, ps_lnx/
-    ps und Windows services ueber detect-Regeln der JSON (T_RUNTIME).
-  - Das HW/SW-Inventory (installierte Pakete) ist nur noch Info, kein
-    Beleg mehr - die frueheren Pakettreffer mussten nachtraeglich per
-    requires_evidence wieder aussortiert werden.
+  Evidence (since 0.9.0-b14, see _analyze_host()):
+  - Directly from the agent output (get-agent-output @cached): sections
+    whose name maps to a token and which deliver real data
+    (T_SECTION), the plug-in list checkmk_agent_plugins_lnx/_win
+    (T_PLUGIN) and running services/processes from systemd_units, ps_lnx/
+    ps and Windows services via detect rules of the JSON (T_RUNTIME).
+  - The HW/SW inventory (installed packages) is only info now, no longer
+    evidence - the earlier package matches had to be filtered out again
+    afterwards via requires_evidence.
 
-Scope (weiterhin bewusst reduziert):
-  - Nur ein manueller "Analyse jetzt starten"-Knopf, kein Scheduler, keine
-    Notifications.
-  - Die Analyse laeuft weiterhin SYNCHRON (kein cmk.gui.background_job):
-    "cmk -L" wird via subprocess GENAU EINMAL pro Analyse-Lauf ausgefuehrt
-    und fuer alle Hosts wiederverwendet (siehe _available_plugin_map()
-    mit einfachem Zeit-basiertem Cache, analog available_plugins() im
-    Referenz-Special-Agent-Skript). Fuer produktiv sehr viele Hosts /
-    aufwendigere Logik sollte dennoch auf cmk.gui.background_job
-    umgestellt werden.
+Scope (still deliberately reduced):
+  - Only a manual "Start analysis now" button, no scheduler, no
+    notifications.
+  - The analysis still runs SYNCHRONOUSLY (no cmk.gui.background_job):
+    "cmk -L" is executed via subprocess EXACTLY ONCE per analysis run
+    and reused for all hosts (see _available_plugin_map()
+    with a simple time-based cache, analogous to available_plugins() in the
+    reference special agent script). For production use with very many hosts /
+    more complex logic, it should nevertheless be switched to
+    cmk.gui.background_job.
 
-Ausbaustufe 2.0.0 (Piggyback-Erweiterung, siehe
-PLAN_piggyback_background_job.md - alle Entscheidungen dort sind final):
-  - Neue Funktionen _build_piggyback_payload()/_write_piggyback_data()/
-    _run_piggyback_full()/_run_piggyback_refresh(): erzeugen pro Host ein
-    JSON-Payload (Findings/Coverage/beide Zeitstempel) und schreiben es
-    per cmk.piggyback.backend.store_piggyback_raw_data() (offizielle API,
-    KEIN rohes Dateisystem-Schreiben) unter der Piggyback-Quelle
-    "monitoring_coverage_analyzer" fuer jeden Host ab.
-  - Erweiterte Cache-Datei (_CACHE_FILE_REL): traegt jetzt zusaetzlich
-    "last_full_run_timestamp" (echter Full-Run: neue Livestatus-Query +
-    Regelauswertung) und "last_piggyback_refresh_timestamp" (letzter
-    Refresh-Tick: gleicher Inhalt, nur neuer message_timestamp beim
-    erneuten store_piggyback_raw_data()-Aufruf). Beide Zeitstempel werden
-    vom Check-Plugin (siehe cmk_addons_plugins/monitoring_coverage_
-    analyzer/agent_based/monitoring_coverage.py) als ZWEI GETRENNTE
-    Zeilen im Service-Output angezeigt (Transparenzprinzip, Plan-
-    Entscheidung 11) - "Content last computed" vs. "Piggyback transfer
+Expansion stage 2.0.0 (piggyback extension, see
+PLAN_piggyback_background_job.md - all decisions there are final):
+  - New functions _build_piggyback_payload()/_write_piggyback_data()/
+    _run_piggyback_full()/_run_piggyback_refresh(): create a JSON payload
+    per host (findings/coverage/both timestamps) and write it
+    via cmk.piggyback.backend.store_piggyback_raw_data() (official API,
+    NO raw file system writes) under the piggyback source
+    "monitoring_coverage_analyzer" for each host.
+  - Extended cache file (_CACHE_FILE_REL): now additionally carries
+    "last_full_run_timestamp" (real full run: new Livestatus query +
+    rule evaluation) and "last_piggyback_refresh_timestamp" (last
+    refresh tick: same content, only a new message_timestamp on the
+    repeated store_piggyback_raw_data() call). Both timestamps are
+    shown by the check plugin (see cmk_addons_plugins/monitoring_coverage_
+    analyzer/agent_based/monitoring_coverage.py) as TWO SEPARATE
+    lines in the service output (transparency principle, plan
+    decision 11) - "Content last computed" vs. "Piggyback transfer
     last refreshed".
-  - Zwei neue GET-Parameter fuer den Cron-Trigger:
-      ?_cron_fullrun=1  -> Full-Run (nur wenn piggyback_interval_hours
-                           abgelaufen ist, ausser _force=1 ist gesetzt)
-                           + volles Piggyback-Update (neuer Inhalt,
-                           beide Zeitstempel neu).
-      ?_cron_refresh=1  -> NUR Refresh-Tick: letzten gecachten Inhalt
-                           erneut mit neuem message_timestamp schreiben,
-                           KEINE Livestatus-Query. Nur der zweite
-                           Zeitstempel aendert sich.
-    Aufrufweg: beide Endpunkte werden PRAGMATISCH per direktem
-    Python-Aufruf im Site-Kontext getriggert (cmk.gui.utils.
-    script_helpers.application_and_request_context(), siehe
-    local/bin/monitoring_coverage_analyzer_cron - analog zu
-    Checkmk-eigenen CLI-Skripten wie cmk-update-config), NICHT per
-    authentifiziertem HTTP-Request: fuer einen reinen Cron-Trigger ist
-    das einfacher/robuster als eine automation-user-secret-Loesung
-    (kein Netzwerk-Roundtrip, kein Secret-Handling noetig) und wurde vom
-    Plan als bevorzugte Alternative ausdruecklich zugelassen ("falls ein
-    einfacherer, sauberer Weg existiert ... das bevorzugen"). Der GET-
-    Parameter-Mechanismus in dieser Datei bleibt trotzdem bestehen (auch
-    per echtem HTTP-Request nutzbar, z.B. fuer manuelle Tests via curl
-    mit GUI-Session-Cookie), nur das mitgelieferte Cron-Skript nutzt den
-    direkten Python-Weg.
-  - "Re-run analysis"-Knopf loest weiterhin sofort einen echten Full-Run
-    aus UND stoesst danach (wenn generate_piggyback_data aktiv ist)
-    sofort auch den Piggyback-Full-Write an (neuer Inhalt fuer beide
-    Zeitstempel, siehe PageMonitoringCoverageAnalyzer._show_results()).
+  - Two new GET parameters for the cron trigger:
+      ?_cron_fullrun=1  -> full run (only if piggyback_interval_hours
+                           has expired, unless _force=1 is set)
+                           + full piggyback update (new content,
+                           both timestamps renewed).
+      ?_cron_refresh=1  -> ONLY refresh tick: write the last cached content
+                           again with a new message_timestamp,
+                           NO Livestatus query. Only the second
+                           timestamp changes.
+    Invocation path: both endpoints are triggered PRAGMATICALLY via a direct
+    Python call in the site context (cmk.gui.utils.
+    script_helpers.application_and_request_context(), see
+    local/bin/monitoring_coverage_analyzer_cron - analogous to
+    Checkmk's own CLI scripts such as cmk-update-config), NOT via an
+    authenticated HTTP request: for a pure cron trigger this is
+    simpler/more robust than an automation-user-secret solution
+    (no network round trip, no secret handling needed) and was explicitly
+    allowed by the plan as the preferred alternative ("if a
+    simpler, cleaner way exists ... prefer that"). The GET
+    parameter mechanism in this file remains nevertheless (also
+    usable via a real HTTP request, e.g. for manual tests via curl
+    with a GUI session cookie), only the bundled cron script uses the
+    direct Python path.
+  - The "Re-run analysis" button still immediately triggers a real full run
+    AND afterwards (if generate_piggyback_data is enabled) immediately
+    also kicks off the piggyback full write (new content for both
+    timestamps, see PageMonitoringCoverageAnalyzer._show_results()).
 """
 from __future__ import annotations
 
@@ -142,28 +142,28 @@ from cmk.gui.pages import Page, PageContext, PageEndpoint, PageResult, page_regi
 from cmk.gui.utils.html import HTML
 from cmk.gui.utils.urls import makeuri_contextless
 
-# 0.9.0-b21: gemeinsame Auswertung (Ignore-Regeln, Status, Coverage, Texte)
-# mit dem Check-Plugin - beide wenden die Setup-Regel gleich an.
+# 0.9.0-b21: shared evaluation (ignore rules, status, coverage, texts)
+# with the check plugin - both apply the setup rule the same way.
 from cmk_addons.plugins.monitoring_coverage_analyzer.lib import evaluate as _ev
 from cmk_addons.plugins.monitoring_coverage_analyzer.lib import runstate as _rs
 
-# Piggyback-Schreib-API (cmk.piggyback.backend): siehe lib/runstate.py
+# Piggyback write API (cmk.piggyback.backend): see lib/runstate.py
 
 PAGE_TITLE = _("Analyze monitoring coverage")
 
-# Ausbaustufe 2.0.0: Konstanten fuer die Piggyback-Erweiterung (siehe
-# PLAN_piggyback_background_job.md, Entscheidungen 4-7).
+# Expansion stage 2.0.0: constants for the piggyback extension (see
+# PLAN_piggyback_background_job.md, decisions 4-7).
 PIGGYBACK_SOURCE_HOSTNAME = "monitoring_coverage_analyzer"
 PIGGYBACK_SECTION_NAME = "checkmk_monitoring_coverage"
 PIGGYBACK_SERVICE_TITLE = "Checkmk Monitoring Coverage"
-# Fest verdrahtetes Refresh-Tick-Intervall (Plan-Entscheidung 7, NICHT
-# konfigurierbar) - wird von _run_piggyback_refresh() zwar nicht selbst
-# durchgesetzt (das macht der Cron-Zeitplan alle 5 Minuten), aber hier
-# als Konstante dokumentiert, damit sie an einer Stelle nachlesbar ist.
+# Hard-wired refresh tick interval (plan decision 7, NOT configurable) -
+# not enforced by _run_piggyback_refresh() itself (the cron schedule does
+# that every 5 minutes), but documented here as a constant so it can be
+# looked up in one place.
 PIGGYBACK_REFRESH_INTERVAL_SECONDS = 5 * 60
 
-# 0.9.0-b15: Spinner fuer den "Re-run analysis"-Knopf (reines CSS, keine
-# Bilddatei - Farbe folgt dem Theme ueber currentColor).
+# 0.9.0-b15: spinner for the "Re-run analysis" button (pure CSS, no
+# image file - color follows the theme via currentColor).
 _RERUN_SPINNER_CSS = """<style>
 #mca_running { margin-left: 10px; vertical-align: middle; }
 .mca_spinner {
@@ -186,22 +186,22 @@ _RERUN_ONSUBMIT_JS = (
 
 
 # ---------------------------------------------------------------------------
-# Coverage-Wissensbasis (Schritt 1.4.0: rein daten-basiert): die Regeln
-# (Alias-/Titel-/Hinweis-Tabellen, Stop-Tokens) liegen AUSSCHLIESSLICH in
-# der Datei monitoring_coverage_analyzer_rules.json im selben Verzeichnis -
-# es gibt bewusst KEINE im Code hartcodierte Kopie/Fallback mehr. Damit ist
-# fuer jedes Analyse-Ergebnis eindeutig: es kommt IMMER aus dieser einen
-# JSON-Datei, nie aus einer stillen Code-Alternative. Erweiterungen/
-# Korrekturen sind dadurch OHNE Code-Aenderung/Redeploy moeglich (Datei auf
-# der Site editieren, naechster Analyse-Lauf liest sie automatisch neu ein,
-# siehe _load_rules()/_reload_rules()).
+# Coverage knowledge base (step 1.4.0: purely data-driven): the rules
+# (alias/title/hint tables, stop tokens) live EXCLUSIVELY in the file
+# monitoring_coverage_analyzer_rules.json in the same directory -
+# there is deliberately NO hard-coded copy/fallback in the code anymore. This
+# makes it unambiguous for every analysis result: it ALWAYS comes from this one
+# JSON file, never from a silent code alternative. Extensions/
+# corrections are thus possible WITHOUT code change/redeploy (edit the file on
+# the site, the next analysis run re-reads it automatically,
+# see _load_rules()/_reload_rules()).
 #
-# Konsequenz: fehlt die Datei, ist sie kaputtes JSON, oder ist der Inhalt
-# strukturell unbrauchbar (leere aliases/titles), schlaegt der Analyse-Lauf
-# mit einer klaren Fehlermeldung fehl (siehe _query_and_analyze_hosts()) -
-# es wird NICHT stillschweigend mit einer unvollstaendigen/falschen
-# Wissensbasis weitergearbeitet. Andernfalls waere spaeter unklar, ob ein
-# Ergebnis aus der echten Regel-Datei oder aus einem Code-Fallback stammt.
+# Consequence: if the file is missing, is broken JSON, or its content is
+# structurally unusable (empty aliases/titles), the analysis run fails
+# with a clear error message (see _query_and_analyze_hosts()) -
+# it does NOT silently continue with an incomplete/wrong
+# knowledge base. Otherwise it would later be unclear whether a
+# result came from the real rules file or from a code fallback.
 # ---------------------------------------------------------------------------
 
 _RULES_FILE_NAME = "monitoring_coverage_analyzer_rules.json"
@@ -212,83 +212,82 @@ class _Rules(NamedTuple):
     titles: dict[str, str]
     hints: dict[str, str]
     stop_tokens: frozenset[str]
-    # 0.9.0-b14: positive Erkennungsregeln statt nachtraeglichem
-    # requires_evidence-Filter, siehe _match_condition().
+    # 0.9.0-b14: positive detection rules instead of a retroactive
+    # requires_evidence filter, see _match_condition().
     detect: dict[str, dict[str, list[str]]]
     section_data: dict[str, str]
     section_ignore: frozenset[str]
     no_data_lines: list[str]
-    # 0.9.0-b21: Plug-in-Familien, die der generische Abgleich nie
-    # vorschlaegt (zu allgemeine Namen wie "local", "win", "job").
+    # 0.9.0-b21: plug-in families that the generic matching never
+    # suggests (too generic names like "local", "win", "job").
     generic_ignore_families: frozenset[str] = frozenset()
-    # 0.9.0-b26: Sections, bei denen "Header da, keine Daten" ein gueltiger
-    # Zustand ist (z.B. windows_tasks ohne passende Tasks) - siehe
+    # 0.9.0-b26: sections for which "header present, no data" is a valid
+    # state (e.g. windows_tasks without matching tasks) - see
     # _analyze_host().
     empty_ok: frozenset[str] = frozenset()
 
 
 class RulesLoadError(RuntimeError):
-    """Die Coverage-Regel-Datei fehlt oder ist nicht nutzbar.
+    """The coverage rules file is missing or unusable.
 
-    Wird bewusst NICHT abgefangen und stillschweigend durch eine
-    Code-Fallback-Wissensbasis ersetzt: die Regel-Erkennung ist rein
-    daten-basiert (siehe Modul-Docstring oben), ein Analyse-Ergebnis soll
-    niemals aus einer unklaren Quelle stammen koennen. Aufrufer (siehe
-    _query_and_analyze_hosts()) fangen diesen Fehler ab und zeigen ihn dem
-    Benutzer klar an, statt den Lauf mit falschen/fehlenden Regeln
-    fortzusetzen.
+    Deliberately NOT caught and silently replaced by a
+    code-fallback knowledge base: rule detection is purely
+    data-driven (see module docstring above), an analysis result must
+    never be able to come from an unclear source. Callers (see
+    _query_and_analyze_hosts()) catch this error and show it clearly to the
+    user, instead of continuing the run with wrong/missing rules.
     """
 
 
-# Kapabilitaets-Typen (angelehnt an T_* im Referenz-Check).
+# Capability types (modeled on T_* in the reference check).
 T_LABEL = "host_label"
-# 0.9.0-b14: installierte Pakete (HW/SW-Inventory) sind KEIN Beleg mehr -
-# sie erzeugen fuer sich allein kein Finding, sondern erscheinen nur noch
-# als Info-Zeile unter "Sources" (siehe _analyze_host()).
+# 0.9.0-b14: installed packages (HW/SW inventory) are NO longer evidence -
+# on their own they do not produce a finding, but only appear
+# as an info line under "Sources" (see _analyze_host()).
 T_INV_PACKAGE = "inv_package"
-# 0.9.0-b14: direkter Beleg - eine Section der Agent-Ausgabe (get-agent-
-# output @cached), deren Name auf das Token abbildet, liefert echte Daten
-# (bzw. eine "direct"-Regel aus detect greift). Vorher kam T_SECTION aus
-# der Plug-in-Liste im HW/SW-Inventory.
+# 0.9.0-b14: direct evidence - a section of the agent output (get-agent-
+# output @cached) whose name maps to the token delivers real data
+# (or a "direct" rule from detect matches). Previously T_SECTION came from
+# the plug-in list in the HW/SW inventory.
 T_SECTION = "agent_section"
-# 0.9.0-b14: ausgeliefertes Agent-Plug-in / Local Check laut Section
-# checkmk_agent_plugins_lnx/_win der Agent-Ausgabe.
+# 0.9.0-b14: deployed agent plug-in / local check according to section
+# checkmk_agent_plugins_lnx/_win of the agent output.
 T_PLUGIN = "agent_plugin"
-# 0.9.0-b14: indirekter Beleg - Dienst/Prozess laeuft (systemd_units,
-# ps_lnx/ps, Windows services), Regeln unter detect.<token>.runtime.
+# 0.9.0-b14: indirect evidence - service/process is running (systemd_units,
+# ps_lnx/ps, Windows services), rules under detect.<token>.runtime.
 T_RUNTIME = "runtime"
-# T_CHECK (0.9.0-b6): bereits ueberwachter check_command als eigener
-# Kapabilitaets-Beleg - siehe Docstring in _analyze_host().
+# T_CHECK (0.9.0-b6): already monitored check_command as its own
+# capability evidence - see docstring in _analyze_host().
 T_CHECK = "check_command"
 
 
 def _rules_path() -> str:
-    """Pfad zu monitoring_coverage_analyzer_rules.json.
+    """Path to monitoring_coverage_analyzer_rules.json.
 
-    WICHTIG (seit 0.9.0-b3): auf manchen Sites/Checkmk-Versionen fasst der
-    Legacy-Plugin-Loader (load_web_plugins) alle Page-Plugins zu einer
-    synthetischen Datei unter lib/python3/cmk/gui/utils/ zusammen, bevor sie
-    ausgefuehrt wird. In diesem Fall zeigt __file__ NICHT mehr auf das
-    tatsaechliche Ablageverzeichnis share/check_mk/web/plugins/pages/,
-    sondern auf diesen synthetischen Zwischenpfad - dort liegt die JSON-Datei
-    nie, siehe Bug-Report des Users ("...lib/python3/cmk/gui/utils/
-    monitoring_coverage_analyzer_rules.json ... konnte nicht gelesen
-    werden").
+    IMPORTANT (since 0.9.0-b3): on some sites/Checkmk versions the
+    legacy plugin loader (load_web_plugins) merges all page plugins into a
+    synthetic file under lib/python3/cmk/gui/utils/ before it is
+    executed. In that case __file__ NO longer points to the
+    actual installation directory share/check_mk/web/plugins/pages/,
+    but to this synthetic intermediate path - the JSON file never lives
+    there, see the user's bug report ("...lib/python3/cmk/gui/utils/
+    monitoring_coverage_analyzer_rules.json ... could not be
+    read").
 
-    Deshalb: zuerst neben __file__ suchen (funktioniert auf den meisten
-    Sites), und wenn die Datei dort nicht existiert, auf den
-    OMD_ROOT-relativen Installationspfad zurueckfallen, unter dem das MKP
-    die Datei tatsaechlich ablegt (share/check_mk/web/plugins/pages/).
+    Therefore: first look next to __file__ (works on most
+    sites), and if the file does not exist there, fall back to the
+    OMD_ROOT-relative installation path where the MKP
+    actually places the file (share/check_mk/web/plugins/pages/).
     """
     candidate = os.path.join(os.path.dirname(os.path.abspath(__file__)), _RULES_FILE_NAME)
     if os.path.isfile(candidate):
         return candidate
     omd_root = os.environ.get("OMD_ROOT", "")
     if omd_root:
-        # WICHTIG: MKP-Inhalte landen unter local/share/... (nicht direkt
-        # unter share/...) - share/check_mk/... ist der Pfad fuer
-        # Checkmk-Bordmittel, lokal installierte Erweiterungen liegen
-        # immer unter local/.
+        # IMPORTANT: MKP contents end up under local/share/... (not directly
+        # under share/...) - share/check_mk/... is the path for
+        # Checkmk built-ins, locally installed extensions always live
+        # under local/.
         fallback = os.path.join(
             omd_root,
             "local",
@@ -305,14 +304,14 @@ def _rules_path() -> str:
 
 
 def _load_rules() -> _Rules:
-    """Laedt die Coverage-Regeln AUSSCHLIESSLICH aus
-    monitoring_coverage_analyzer_rules.json - rein daten-basiert, ohne
-    Code-Fallback (siehe RulesLoadError-Docstring). Jeder Fehlerfall
-    (Datei fehlt, ungueltiges JSON, leere/kaputte Struktur) fuehrt zu einer
-    RulesLoadError mit einer fuer den Benutzer verstaendlichen Meldung, statt
-    still auf eine im Code hinterlegte Alternative auszuweichen. Kein
-    Zeit-basierter Cache noetig: die Datei wird nur einmal pro Analyse-Lauf
-    gelesen (siehe Aufrufer in _query_and_analyze_hosts()).
+    """Loads the coverage rules EXCLUSIVELY from
+    monitoring_coverage_analyzer_rules.json - purely data-driven, without
+    code fallback (see RulesLoadError docstring). Every error case
+    (file missing, invalid JSON, empty/broken structure) leads to a
+    RulesLoadError with a message understandable to the user, instead of
+    silently falling back to an alternative stored in the code. No
+    time-based cache needed: the file is read only once per analysis run
+    (see caller in _query_and_analyze_hosts()).
     """
     path = _rules_path()
     try:
@@ -320,18 +319,18 @@ def _load_rules() -> _Rules:
             data = json.load(handle)
     except OSError as exc:
         raise RulesLoadError(
-            f"Regel-Datei {path!r} konnte nicht gelesen werden ({exc}). "
-            "Die Datei muss neben diesem Python-Modul liegen."
+            f"Rules file {path!r} could not be read ({exc}). "
+            "The file must be located next to this Python module."
         ) from exc
     except ValueError as exc:
         raise RulesLoadError(
-            f"Regel-Datei {path!r} enthaelt kein gueltiges JSON ({exc})."
+            f"Rules file {path!r} does not contain valid JSON ({exc})."
         ) from exc
 
     if not isinstance(data, dict):
         raise RulesLoadError(
-            f"Regel-Datei {path!r} muss ein JSON-Objekt sein (aliases/titles/"
-            "hints/stop_tokens), gefunden: {type(data).__name__}."
+            f"Rules file {path!r} must be a JSON object (aliases/titles/"
+            "hints/stop_tokens), found: {type(data).__name__}."
         )
 
     aliases = dict(data.get("aliases") or {})
@@ -362,12 +361,12 @@ def _load_rules() -> _Rules:
             re.compile(pattern)
         except re.error as exc:
             raise RulesLoadError(
-                f"Regel-Datei {path!r}: ungueltiger regulaerer Ausdruck {pattern!r} ({exc})."
+                f"Rules file {path!r}: invalid regular expression {pattern!r} ({exc})."
             ) from exc
     if not aliases or not titles:
         raise RulesLoadError(
-            f"Regel-Datei {path!r} ist strukturell unbrauchbar: 'aliases' "
-            "und/oder 'titles' sind leer oder fehlen."
+            f"Rules file {path!r} is structurally unusable: 'aliases' "
+            "and/or 'titles' are empty or missing."
         )
     return _Rules(
         aliases, titles, hints, stop_tokens, detect, section_data, section_ignore, no_data_lines,
@@ -375,12 +374,12 @@ def _load_rules() -> _Rules:
     )
 
 
-# Modul-globale Wissensbasis, per _reload_rules() befuellt - siehe
-# Modul-Docstring oben: rein daten-basiert, kein Code-Fallback. Bleibt bis
-# zum ersten erfolgreichen _reload_rules()-Aufruf leer; _query_and_analyze_
-# hosts() ruft _reload_rules() zu Beginn jedes Laufs auf und bricht bei
-# RulesLoadError mit einer klaren Fehlermeldung ab, statt mit leeren/alten
-# Regeln weiterzulaufen.
+# Module-global knowledge base, filled via _reload_rules() - see
+# module docstring above: purely data-driven, no code fallback. Stays empty
+# until the first successful _reload_rules() call; _query_and_analyze_
+# hosts() calls _reload_rules() at the start of each run and aborts on
+# RulesLoadError with a clear error message, instead of continuing with
+# empty/old rules.
 ALIASES: dict[str, str] = {}
 TITLES: dict[str, str] = {}
 HINTS: dict[str, str] = {}
@@ -394,11 +393,11 @@ EMPTY_OK: frozenset[str] = frozenset()
 
 
 def _reload_rules() -> None:
-    """Liest monitoring_coverage_analyzer_rules.json neu ein und aktualisiert
-    die modul-globalen Regel-Tabellen (ALIASES/TITLES/HINTS/STOP_TOKENS/
+    """Re-reads monitoring_coverage_analyzer_rules.json and updates
+    the module-global rule tables (ALIASES/TITLES/HINTS/STOP_TOKENS/
     DETECT/SECTION_DATA/SECTION_IGNORE/NO_DATA_LINES)
-    in-place (dict.clear() + update(), damit bereits gebundene Referenzen -
-    z.B. Closures - weiter auf dieselben Objekte zeigen)."""
+    in place (dict.clear() + update(), so that already bound references -
+    e.g. closures - keep pointing to the same objects)."""
     rules = _load_rules()
     ALIASES.clear()
     ALIASES.update(rules.aliases)
@@ -419,11 +418,11 @@ def _reload_rules() -> None:
 
 
 def _rules_source_status() -> str:
-    """Menschenlesbare Herkunfts-Auskunft ueber die aktuell geladenen
-    Findings-/Hint-Regeln - beantwortet direkt die Frage "woher kommt
-    dieses Ergebnis": Pfad der JSON-Datei, ihr Aenderungszeitpunkt, und die
-    Anzahl geladener Eintraege je Tabelle. Es gibt keine Code-Fallback-
-    Quelle mehr (siehe Modul-Docstring), daher immer dieselbe Datei.
+    """Human-readable provenance info about the currently loaded
+    findings/hint rules - directly answers the question "where does
+    this result come from": path of the JSON file, its modification time, and the
+    number of loaded entries per table. There is no code fallback
+    source anymore (see module docstring), hence always the same file.
     """
     path = _rules_path()
     try:
@@ -442,17 +441,16 @@ def _rules_source_status() -> str:
 try:
     _reload_rules()
 except RulesLoadError:
-    # Beim Modul-Import (z.B. beim ersten WATO-Seitenaufbau, bevor ueberhaupt
-    # ein Analyse-Lauf gestartet wurde) soll ein Problem mit der Regel-Datei
-    # NICHT den kompletten Seitenaufbau/die Menuregistrierung zum Absturz
-    # bringen. ALIASES/TITLES/HINTS/STOP_TOKENS bleiben dann leer; der
-    # eigentliche Analyse-Lauf ruft _reload_rules() erneut auf (siehe
-    # _query_and_analyze_hosts()) und zeigt den Fehler dem Benutzer dort
-    # klar an, statt hier eine Seite mit Stacktrace zu zerstoeren.
+    # On module import (e.g. on the first WATO page build, before any analysis
+    # run has even been started) a problem with the rules file must NOT crash
+    # the whole page build/menu registration. ALIASES/TITLES/HINTS/STOP_TOKENS
+    # then stay empty; the actual analysis run calls _reload_rules() again
+    # (see _query_and_analyze_hosts()) and shows the error clearly to the user
+    # there, instead of breaking a page with a stack trace here.
     pass
 
-# Cache fuer "cmk -L" (available_plugins) - EINMAL pro Analyse-Lauf, nicht
-# pro Host: analog available_plugins() im Referenz-Special-Agent-Skript
+# Cache for "cmk -L" (available_plugins) - ONCE per analysis run, not per
+# host: analogous to available_plugins() in the reference special agent script
 # libexec/agent_monitoring_coverage.
 _AVAILABLE_PLUGINS_CACHE_TTL = 60.0
 _available_plugins_cache: dict[str, tuple[float, Any]] = {}
@@ -462,18 +460,18 @@ _SAFE_HOST_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 
 def _canonical_token(raw: str) -> str:
-    """Normalisiert einen rohen Plug-in-/Prozess-/Paketnamen auf einen Token
+    """Normalizes a raw plug-in/process/package name to a token
 
-    Schritt-3-Fix: Agent-Plug-in-Dateinamen wie "mk_inventory" oder
-    "mk_apt.py" enthalten Unterstriche, die vom urspruenglichen
-    _TOKEN_RE ([a-z0-9]+) als Trenner behandelt wurden - dadurch wurde
-    "mk_inventory" faelschlich zu "mk" verkuerzt (kein ALIASES-Treffer,
-    T_SECTION fuer "inventory" ging verloren). Fix: zuerst eine bekannte
-    Dateiendung (.py/.sh/.exe) abschneiden und den KOMPLETTEN (Punkt-/
-    Leerzeichen-bereinigten) Namen gegen ALIASES pruefen, bevor auf den
-    "erstes alphanumerisches Wort"-Fallback zurueckgefallen wird (der
-    fuer Prozessnamen wie "mariadb 10.6.1" oder Paketnamen wie
-    "cups-browsed" weiterhin das gewuenschte Verhalten liefert).
+    Step 3 fix: agent plug-in file names such as "mk_inventory" or
+    "mk_apt.py" contain underscores, which the original
+    _TOKEN_RE ([a-z0-9]+) treated as separators - as a result
+    "mk_inventory" was wrongly shortened to "mk" (no ALIASES hit,
+    T_SECTION for "inventory" was lost). Fix: first strip a known
+    file extension (.py/.sh/.exe) and check the COMPLETE (dot/
+    whitespace-cleaned) name against ALIASES, before falling back to
+    the "first alphanumeric word" fallback (which still yields the
+    desired behavior for process names such as "mariadb 10.6.1" or
+    package names such as "cups-browsed").
     """
     raw = raw.strip().lower()
     for suffix in (".py", ".sh", ".exe", ".pl", ".ps1", ".vbs", ".bat", ".cmd"):
@@ -488,8 +486,8 @@ def _canonical_token(raw: str) -> str:
 
 
 def _cmk_list_plugins() -> list[tuple[str, str, str]]:
-    """'cmk -L' -> [(plugin, typ, titel)], typ z.B. "agent", "snmp",
-    "active". Gleicher TTL-Cache wie _available_plugin_map()."""
+    """'cmk -L' -> [(plugin, type, title)], type e.g. "agent", "snmp",
+    "active". Same TTL cache as _available_plugin_map()."""
     now = time.time()
     cached = _available_plugins_cache.get("rows")
     if cached is not None and (now - cached[0]) < _AVAILABLE_PLUGINS_CACHE_TTL:
@@ -508,20 +506,20 @@ def _cmk_list_plugins() -> list[tuple[str, str, str]]:
             if not parts:
                 continue
             rows.append((parts[0], parts[1] if len(parts) > 1 else "", parts[2] if len(parts) > 2 else ""))
-    except Exception:  # pragma: no cover - defensive, GUI-Kontext
+    except Exception:  # pragma: no cover - defensive, GUI context
         rows = []
     _available_plugins_cache["rows"] = (now, rows)
     return rows
 
 
 def _available_plugin_map() -> dict[str, list[str]]:
-    """Liefert token -> sortierte Liste der auf der Site per 'cmk -L'
-    verfuegbaren Check-Plugin-Namen (kanonisiert via ALIASES), mit
-    einfachem Zeit-basiertem Cache ueber den Prozesslebenszyklus hinweg.
+    """Returns token -> sorted list of the check plugin names available on
+    the site via 'cmk -L' (canonicalized via ALIASES), with a simple
+    time-based cache across the process lifecycle.
 
-    'cmk -L' wird GENAU EINMAL pro Analyse-Lauf (bzw. bis zum TTL-Ablauf)
-    aufgerufen, unabhaengig von der Anzahl der zu analysierenden Hosts -
-    Performance-Vorgabe aus der Aufgabenstellung.
+    'cmk -L' is called EXACTLY ONCE per analysis run (or until the TTL
+    expires), regardless of the number of hosts to analyze -
+    performance requirement from the task specification.
     """
     now = time.time()
     cached = _available_plugins_cache.get("map")
@@ -535,25 +533,25 @@ def _available_plugin_map() -> dict[str, list[str]]:
             plugin_map.setdefault(token, set()).add(first_word)
 
     result = {token: sorted(names) for token, names in plugin_map.items()}
-    # Schritt 3: der aktive Check "cmk_inv" (Checkmk HW/SW Inventory) ist
-    # auf JEDER Checkmk-Site verfuegbar, taucht aber nicht in "cmk -L"
-    # auf (das listet nur agent_based Check-Plugins, keine aktiven
-    # Checks) - deshalb hier unbedingt als verfuegbar seeden, sonst
-    # koennte "inventory" nie als monitorbares Subsystem erkannt werden.
+    # Step 3: the active check "cmk_inv" (Checkmk HW/SW Inventory) is
+    # available on EVERY Checkmk site, but does not show up in "cmk -L"
+    # (which only lists agent_based check plugins, no active
+    # checks) - so it must be seeded as available here, otherwise
+    # "inventory" could never be detected as a monitorable subsystem.
     result.setdefault("inventory", ["cmk_inv"])
     _available_plugins_cache["map"] = (now, result)
     return result
 
 
 def _inventory_package_names(host_name: str) -> list[str]:
-    """Liest die im HW/SW-Inventory der Site abgelegten installierten
-    Pakete dieses Hosts. Seit 0.9.0-b14 nur noch Info (siehe
-    T_INV_PACKAGE), kein Beleg fuer ein Finding.
+    """Reads the installed packages of this host stored in the site's
+    HW/SW inventory. Since 0.9.0-b14 informational only (see
+    T_INV_PACKAGE), not evidence for a finding.
 
-    Quelle: var/check_mk/inventory/<host>.json (Checkmk HW/SW-Inventory-
-    Baum), Pfad Nodes.software.Nodes.packages.Table.Rows[].name.
-    Bewusst defensiv: fehlt die Datei / das Inventory fuer diesen Host,
-    wird einfach eine leere Liste zurueckgegeben (kein Fehler in der GUI).
+    Source: var/check_mk/inventory/<host>.json (Checkmk HW/SW inventory
+    tree), path Nodes.software.Nodes.packages.Table.Rows[].name.
+    Deliberately defensive: if the file / the inventory for this host is
+    missing, an empty list is simply returned (no error in the GUI).
     """
     if not _SAFE_HOST_RE.match(host_name):
         return []
@@ -584,20 +582,20 @@ def _inventory_package_names(host_name: str) -> list[str]:
 _RAW_CACHE_SECTION_RE = re.compile(r"^<<<([A-Za-z0-9_.-]+)(?::[^>]*)?>>>\s*$")
 _PIGGYBACK_MARKER_RE = re.compile(r"^<<<<(.*)>>>>\s*$")
 
-# 0.9.0-b7: Datenquelle fuer die Agent-Sections ist die (auf der Site
-# gepatchte) Automation "get-agent-output <HOST> agent @cached" ueber den
-# laufenden automation-helper (cmk-automation-client). "@cached" setzt
-# FileCacheOptions(use_outdated=True) -> die Agent-Quellen lesen die vom
-# Core ohnehin geschriebenen Cache-Dateien ohne Altersgrenze, statt den
-# Agenten erneut abzufragen (live verifiziert auf der Test-Site: mtime der
-# Cache-Datei bleibt unveraendert, ~0.2-0.5 s pro Host). Nur wenn fuer
-# eine Quelle noch GAR KEINE Cache-Datei existiert, holt der Core live
-# (Checkmk-eigenes Verhalten von use_outdated, nicht von uns steuerbar).
-# Gegenueber dem direkten Lesen von tmp/check_mk/cache/<host> liefert die
-# Automation zusaetzlich Special-Agent- und Piggyback-Daten des Hosts.
-# 0.9.0-b8: "@cached" ist ab Checkmk 2.5.0p15 upstream (Mindestversion im
-# MKP). Kein Fallback mehr auf die Cache-Datei - aeltere Sites ohne die
-# Direktive werden per version.min_required ausgeschlossen.
+# 0.9.0-b7: The data source for the agent sections is the (site-patched)
+# automation "get-agent-output <HOST> agent @cached" via the running
+# automation-helper (cmk-automation-client). "@cached" sets
+# FileCacheOptions(use_outdated=True) -> the agent sources read the cache
+# files the core writes anyway, without an age limit, instead of querying
+# the agent again (verified live on the test site: mtime of the cache file
+# stays unchanged, ~0.2-0.5 s per host). Only if NO cache file at all exists
+# yet for a source does the core fetch live (Checkmk's own behavior of
+# use_outdated, not controllable by us).
+# Compared to reading tmp/check_mk/cache/<host> directly, the automation
+# additionally returns special agent and piggyback data of the host.
+# 0.9.0-b8: "@cached" is upstream as of Checkmk 2.5.0p15 (minimum version in
+# the MKP). No more fallback to the cache file - older sites without the
+# directive are excluded via version.min_required.
 _AGENT_OUTPUT_WORKERS = 4
 _AGENT_OUTPUT_TIMEOUT = 60
 SRC_AUTOMATION = "get-agent-output @cached"
@@ -608,19 +606,19 @@ class _AgentSections(NamedTuple):
     sections: dict[str, list[str]]
     source: str
     error: str | None
-    # 0.9.0-b26: Sections in Piggyback-Bloecken fuer ANDERE Hosts:
-    # section_name -> Ziel-Hosts. Kein Beleg fuer diesen Host, aber der
-    # Nachweis, dass ein hier verteiltes Plug-in Daten liefert (z.B.
-    # oxidized: nur Piggyback-Daten fuer die gesicherten Geraete).
+    # 0.9.0-b26: Sections in piggyback blocks for OTHER hosts:
+    # section_name -> target hosts. Not evidence for this host, but proof
+    # that a plug-in deployed here delivers data (e.g.
+    # oxidized: only piggyback data for the backed-up devices).
     piggyback: Mapping[str, frozenset[str]] = {}
-    # 0.9.0-b27: Remote-Site nicht erreichbar/nicht angemeldet - die Analyse
-    # des Hosts ist unvollstaendig (nicht nur "keine Agent-Daten").
+    # 0.9.0-b27: Remote site unreachable/not logged in - the analysis
+    # of the host is incomplete (not just "no agent data").
     site_error: bool = False
 
 
 def _parse_piggyback_sections(raw_text: str) -> dict[str, frozenset[str]]:
-    """Sections in Piggyback-Bloecken fuer ANDERE Hosts, je Section die
-    Ziel-Hosts (nur Sections mit mindestens einer Datenzeile)."""
+    """Sections in piggyback blocks for OTHER hosts, with the target hosts
+    per section (only sections with at least one data line)."""
     found: dict[str, set[str]] = {}
     target: str | None = None
     current: str | None = None
@@ -642,11 +640,11 @@ def _parse_piggyback_sections(raw_text: str) -> dict[str, frozenset[str]]:
 
 
 def _parse_agent_sections(raw_text: str) -> dict[str, list[str]]:
-    """Zerlegt Roh-Agent-Ausgabe in section_name -> Zeilenliste (OHNE die
-    <<<...>>>-Marker-Zeilen). Piggyback-Bloecke fuer ANDERE Hosts
-    (<<<<fremder_host>>>> ... <<<<>>>>, z.B. von Proxmox-/HA-Special-
-    Agents) werden uebersprungen - deren Sections gehoeren nicht zu diesem
-    Host und duerfen keine Evidenz fuer ihn liefern."""
+    """Splits raw agent output into section_name -> list of lines (WITHOUT
+    the <<<...>>> marker lines). Piggyback blocks for OTHER hosts
+    (<<<<foreign_host>>>> ... <<<<>>>>, e.g. from Proxmox/HA special
+    agents) are skipped - their sections do not belong to this
+    host and must not provide evidence for it."""
     sections: dict[str, list[str]] = {}
     current: str | None = None
     in_foreign_piggyback = False
@@ -669,13 +667,13 @@ def _parse_agent_sections(raw_text: str) -> dict[str, list[str]]:
 
 
 def _automation_agent_sections(host_name: str) -> _AgentSections:
-    """Holt die Agent-Ausgabe per
+    """Fetches the agent output via
     'cmk-automation-client get-agent-output <HOST> agent @cached'.
 
-    Antwortformat (live verifiziert): JSON mit
-    "serialized_result_or_error_code" = repr() des Tupels
-    (success: bool, details: str, raw_agent_data: bytes) - daher
-    ast.literal_eval() (nur Literale, kein Code-Ausfuehren)."""
+    Response format (verified live): JSON with
+    "serialized_result_or_error_code" = repr() of the tuple
+    (success: bool, details: str, raw_agent_data: bytes) - hence
+    ast.literal_eval() (literals only, no code execution)."""
     omd_root = os.environ.get("OMD_ROOT", "")
     cli = os.path.join(omd_root, "bin", "cmk-automation-client")
     python = os.path.join(omd_root, "bin", "python3")
@@ -697,7 +695,7 @@ def _automation_agent_sections(host_name: str) -> _AgentSections:
         if not isinstance(serialized, str):
             return _AgentSections({}, SRC_AUTOMATION, f"automation error code {serialized!r}")
         success, details, raw = ast.literal_eval(serialized)
-    except Exception as exc:  # pragma: no cover - defensiv, GUI-Kontext
+    except Exception as exc:  # pragma: no cover - defensive, GUI context
         detail = (proc.stderr or proc.stdout or "").strip()[:300]
         return _AgentSections({}, SRC_AUTOMATION, f"unparsable response ({exc!r}): {detail}")
 
@@ -718,15 +716,15 @@ def _sections_from_result(result: object, source: str) -> _AgentSections:
     )
 
 
-# 0.9.0-b27: Distributed Monitoring. Hosts einer Remote-Site haben auf der
-# Zentrale keinen Agent-Cache - die Zentrale holt die Agent-Ausgabe daher
-# per Remote-Automation von der zustaendigen Site (wie Checkmks eigenes
-# "Download agent output"), ebenfalls mit "@cached" (Remote-Site braucht
-# 2.5.0p15+, sonst fragt sie den Agenten live ab). do_remote_automation ist
-# eine interne GUI-Funktion: Aenderungen der Signatur fuehren zu einer
-# Fehlermeldung je Host, nicht zum Abbruch.
+# 0.9.0-b27: Distributed monitoring. Hosts of a remote site have no agent
+# cache on the central site - the central site therefore fetches the agent
+# output via remote automation from the responsible site (like Checkmk's own
+# "Download agent output"), also with "@cached" (the remote site needs
+# 2.5.0p15+, otherwise it queries the agent live). do_remote_automation is
+# an internal GUI function: signature changes lead to an
+# error message per host, not to an abort.
 def _remote_automation_config(site_id: str) -> tuple[object | None, str | None]:
-    """(RemoteAutomationConfig, None) oder (None, Fehlertext)."""
+    """(RemoteAutomationConfig, None) or (None, error text)."""
     try:
         from cmk.gui.config import active_config
         from cmk.gui.watolib.automations import remote_automation_config_from_site_config
@@ -735,7 +733,7 @@ def _remote_automation_config(site_id: str) -> tuple[object | None, str | None]:
         if site_config is None:
             return None, f"site {site_id!r} is not configured"
         return remote_automation_config_from_site_config(site_config), None
-    except Exception as exc:  # pragma: no cover - GUI-intern
+    except Exception as exc:  # pragma: no cover - GUI internal
         return None, f"site {site_id!r}: {exc}"
 
 
@@ -768,7 +766,7 @@ def _is_local_site(site_id: str | None) -> bool:
 
         site_config = active_config.sites.get(site_id)
         return site_config is None or site_is_local(site_config)
-    except Exception:  # pragma: no cover - GUI-intern
+    except Exception:  # pragma: no cover - GUI internal
         return True
 
 
@@ -781,11 +779,11 @@ def _agent_sections(host_name: str) -> _AgentSections:
 def _collect_agent_sections(
     host_names: Sequence[str], host_sites: Mapping[str, str] | None = None
 ) -> dict[str, _AgentSections]:
-    """Agent-Sections fuer alle Hosts eines Analyse-Laufs, parallel
-    (live gemessen auf der Test-Site, 46 Hosts: seriell 23 s, 4 Worker 8 s,
-    8 Worker kein weiterer Gewinn). Hosts auf Remote-Sites per
-    Remote-Automation; ist eine Site nicht erreichbar, bekommen die
-    restlichen Hosts dieser Site denselben Fehler ohne weiteren Versuch."""
+    """Agent sections for all hosts of an analysis run, in parallel
+    (measured live on the test site, 46 hosts: serial 23 s, 4 workers 8 s,
+    8 workers no further gain). Hosts on remote sites via
+    remote automation; if a site is unreachable, the remaining hosts of
+    that site get the same error without another attempt."""
     host_sites = host_sites or {}
     remote_configs: dict[str, tuple[object | None, str | None]] = {}
     site_errors: dict[str, str] = {}
@@ -808,8 +806,8 @@ def _collect_agent_sections(
         try:
             return _remote_agent_sections(host_name, automation_config)
         except Exception as exc:
-            # Verbindungs-/Auth-/HTTP-Fehler betreffen die ganze Site
-            # (Host-Fehler kommen als success=False zurueck).
+            # Connection/auth/HTTP errors affect the whole site
+            # (host errors come back as success=False).
             message = f"site {site_id!r}: {exc}"
             site_errors.setdefault(site_id, message)
             return _AgentSections({}, SRC_REMOTE_AUTOMATION, message, site_error=True)
@@ -819,28 +817,28 @@ def _collect_agent_sections(
 
 
 # ---------------------------------------------------------------------------
-# 0.9.0-b14: Belege direkt aus der Agent-Ausgabe (get-agent-output @cached).
-# Ersetzt die Plug-in-Liste aus dem HW/SW-Inventory (T_SECTION alt) und den
-# nachtraeglichen requires_evidence-Filter fuer Inventory-Pakete.
+# 0.9.0-b14: Evidence directly from the agent output (get-agent-output @cached).
+# Replaces the plug-in list from the HW/SW inventory (old T_SECTION) and the
+# subsequent requires_evidence filter for inventory packages.
 # ---------------------------------------------------------------------------
 
-# Unterabschnitts-Kopf innerhalb einer Section, z.B. "[df]", "[all]",
-# "[processes]" - zaehlt nie als Datenzeile.
+# Subsection header within a section, e.g. "[df]", "[all]",
+# "[processes]" - never counts as a data line.
 _SUBSECTION_RE = re.compile(r"^\[[^\]]*\]$")
 
-# Prozesse in Containern/LXC gehoeren nicht zu diesem Host - ein Agent-
-# Plug-in auf dem Host koennte sie auch nicht ueberwachen (auf der Test-Site
-# gesehen: MariaDB in einem LXC-Container, nginx/redis in Docker).
+# Processes in containers/LXC do not belong to this host - an agent
+# plug-in on the host could not monitor them either (seen on the test site:
+# MariaDB in an LXC container, nginx/redis in Docker).
 _CONTAINER_CGROUP_RE = re.compile(r"/lxc/|/docker[-/]|/libpod-|/machine\.slice/|/kubepods")
 
 _PLUGIN_SECTIONS = ("checkmk_agent_plugins_lnx", "checkmk_agent_plugins_win")
-# '<pfad>:CMK_VERSION="..."' bzw. '<pfad>:__version__ = "..."' (Python-
-# Plug-ins); Windows-Pfade enthalten selbst ein ':' ("C:\\...").
+# '<path>:CMK_VERSION="..."' or '<path>:__version__ = "..."' (Python
+# plug-ins); Windows paths themselves contain a ':' ("C:\\...").
 _PLUGIN_LINE_RE = re.compile(r"^(.*?):\s*(?:CMK_VERSION|__version__)\b")
 
 
 def _subsection_lines(lines: Sequence[str], name: str) -> list[str]:
-    """Zeilen eines Unterabschnitts ("[name]") einer Section."""
+    """Lines of a subsection ("[name]") of a section."""
     out: list[str] = []
     current: str | None = None
     for line in lines:
@@ -854,8 +852,8 @@ def _subsection_lines(lines: Sequence[str], name: str) -> list[str]:
 
 
 def _section_lines(sections: Mapping[str, list[str]], ref: str) -> list[str] | None:
-    """'<section>' oder '<section>/<unterabschnitt>' -> Zeilen, None wenn
-    die Section fehlt."""
+    """'<section>' or '<section>/<subsection>' -> lines, None if
+    the section is missing."""
     name, _sep, sub = ref.partition("/")
     lines = sections.get(name)
     if lines is None:
@@ -864,8 +862,8 @@ def _section_lines(sections: Mapping[str, list[str]], ref: str) -> list[str] | N
 
 
 def _data_lines(lines: Sequence[str]) -> list[str]:
-    """Echte Datenzeilen: nicht leer, kein Unterabschnitts-Kopf, kein
-    no_data_lines-Treffer (z.B. "no pools available")."""
+    """Real data lines: not empty, no subsection header, no
+    no_data_lines match (e.g. "no pools available")."""
     patterns = [re.compile(p) for p in NO_DATA_LINES]
     return [
         line for line in lines
@@ -876,10 +874,10 @@ def _data_lines(lines: Sequence[str]) -> list[str]:
 
 
 def _section_has_data(name: str, lines: Sequence[str]) -> bool:
-    """Liefert die Section echte Daten? Standard: mind. eine Datenzeile.
-    section_data.<name> (Regel-Datei) verschaerft das auf "mind. eine
-    Datenzeile matcht <regex>" - z.B. FreeBSD-zfs_arc_cache, das nur
-    Nullwerte liefert, wenn ZFS gar nicht benutzt wird."""
+    """Does the section deliver real data? Default: at least one data line.
+    section_data.<name> (rules file) tightens this to "at least one
+    data line matches <regex>" - e.g. FreeBSD zfs_arc_cache, which only
+    delivers zero values when ZFS is not used at all."""
     data = _data_lines(lines)
     pattern = SECTION_DATA.get(name)
     if pattern is None:
@@ -889,7 +887,7 @@ def _section_has_data(name: str, lines: Sequence[str]) -> bool:
 
 
 def _plugin_token(file_name: str) -> str:
-    """Plug-in-Dateiname -> Token; 'mk_mysql' -> 'mysql' usw."""
+    """Plug-in file name -> token; 'mk_mysql' -> 'mysql' etc."""
     token = _canonical_token(file_name)
     if token in TITLES:
         return token
@@ -901,8 +899,8 @@ def _plugin_token(file_name: str) -> str:
 
 
 def _agent_plugin_names(sections: Mapping[str, list[str]]) -> list[str]:
-    """Dateinamen der ausgelieferten Agent-Plug-ins und Local Checks aus
-    checkmk_agent_plugins_lnx/_win (Zeilen '<pfad>:CMK_VERSION=...')."""
+    """File names of the deployed agent plug-ins and local checks from
+    checkmk_agent_plugins_lnx/_win (lines '<path>:CMK_VERSION=...')."""
     names: list[str] = []
     for section in _PLUGIN_SECTIONS:
         for line in sections.get(section, []):
@@ -921,18 +919,18 @@ class _Runtime(NamedTuple):
     systemd_running: list[str]
     processes: list[str]
     win_services_running: list[str]
-    # 0.9.0-b21: Dienstname -> Anzeigename (fuer den generischen Abgleich)
+    # 0.9.0-b21: service name -> display name (for the generic matching)
     win_service_titles: dict[str, str] = {}
 
 
 def _runtime_facts(sections: Mapping[str, list[str]]) -> _Runtime:
-    """Laufende Dienste/Prozesse eines Hosts aus der Agent-Ausgabe.
+    """Running services/processes of a host from the agent output.
 
-    - systemd_units, Unterabschnitt [all]: '<unit> loaded active running ...'
+    - systemd_units, subsection [all]: '<unit> loaded active running ...'
     - ps_lnx [processes]: '<cgroup> <user> <vsz> <rss> <time> <elapsed>
-      <pid> <command>'; Container-/LXC-Prozesse werden verworfen.
-    - ps (Windows/BSD/aeltere Agenten): '(<user>,...)\t<command>'
-    - services (Windows): '<name> <state>/<start_type> <anzeigename>'
+      <pid> <command>'; container/LXC processes are discarded.
+    - ps (Windows/BSD/older agents): '(<user>,...)\t<command>'
+    - services (Windows): '<name> <state>/<start_type> <display_name>'
     """
     units: list[str] = []
     for line in _subsection_lines(sections.get("systemd_units", []), "all"):
@@ -947,7 +945,7 @@ def _runtime_facts(sections: Mapping[str, list[str]]) -> _Runtime:
         if _CONTAINER_CGROUP_RE.search(parts[0]):
             continue
         command = parts[7].split()[0] if parts[7].split() else ""
-        if command.startswith("["):  # Kernel-Threads
+        if command.startswith("["):  # kernel threads
             continue
         processes.append(re.split(r"[\\/]", command)[-1])
     for line in sections.get("ps", []):
@@ -969,16 +967,16 @@ def _runtime_facts(sections: Mapping[str, list[str]]) -> _Runtime:
 def _match_condition(
     condition: str, sections: Mapping[str, list[str]], runtime: _Runtime
 ) -> str | None:
-    """Wertet eine detect-Bedingung aus; liefert bei Treffer einen kurzen
-    Beleg-Text, sonst None. Formate (monitoring_coverage_analyzer_rules.json):
+    """Evaluates a detect condition; on a match returns a short evidence
+    text, otherwise None. Formats (monitoring_coverage_analyzer_rules.json):
 
-      section:<sec>[/<sub>]:data              - Section liefert Daten
-      section:<sec>[/<sub>]:contains:<regex>  - eine Datenzeile matcht
-      systemd:<regex>     - laufende systemd-Unit ([all], active running)
-      process:<regex>     - Prozessname (ohne Pfad), Container ausgenommen
-      winservice:<regex>  - laufender Windows-Dienst (Dienstname)
+      section:<sec>[/<sub>]:data              - section delivers data
+      section:<sec>[/<sub>]:contains:<regex>  - a data line matches
+      systemd:<regex>     - running systemd unit ([all], active running)
+      process:<regex>     - process name (without path), containers excluded
+      winservice:<regex>  - running Windows service (service name)
 
-    Regex immer per re.search - Anker (^...$) gehoeren in die Regel.
+    Regex always via re.search - anchors (^...$) belong in the rule.
     """
     kind, _sep, rest = condition.partition(":")
     try:
@@ -1014,26 +1012,26 @@ def _match_condition(
 
 
 # ---------------------------------------------------------------------------
-# 0.9.0-b21: generischer (unscharfer) Abgleich - findet Subsysteme OHNE
-# Eintrag in der Regel-Datei: fuehrender Namensteil laufender systemd-
-# Units, Prozesse und Windows-Dienste gegen die Familien der Agent-
-# basierten Check-Plug-ins dieser Site ('cmk -L', Typ "agent"; SNMP-Plug-
-# ins koennen fuer einen Agent-Host nie ein fehlendes Agent-Plug-in
-# bedeuten). Filter gegen Unsinn:
-#   - Familien, die die Regel-Datei kennt (TITLES/ALIASES), entscheidet
-#     ausschliesslich die kuratierte Logik (z.B. ZFS braucht echte Daten).
-#   - stop_tokens und generic_ignore_families der Regel-Datei.
-#   - Familie auf dem Host schon ueberwacht (ein Check-Plug-in der
-#     Familie laeuft).
-#   - Familie laeuft auf fast allen Hosts desselben OS (Basis-OS-Dienst),
-#     siehe _GENERIC_COMMON_* in _query_and_analyze_hosts().
-# Eigene Ausnahmen: Setup-Regel "Monitoring coverage analysis".
+# 0.9.0-b21: generic (fuzzy) matching - finds subsystems WITHOUT an
+# entry in the rules file: leading name part of running systemd units,
+# processes and Windows services against the families of the agent-based
+# check plug-ins of this site ('cmk -L', type "agent"; SNMP plug-ins can
+# never indicate a missing agent plug-in for an agent host).
+# Filters against nonsense:
+#   - families known to the rules file (TITLES/ALIASES) are decided
+#     exclusively by the curated logic (e.g. ZFS needs real data).
+#   - stop_tokens and generic_ignore_families of the rules file.
+#   - family already monitored on the host (a check plug-in of the
+#     family is running).
+#   - family runs on almost all hosts of the same OS (base OS service),
+#     see _GENERIC_COMMON_* in _query_and_analyze_hosts().
+# Custom exceptions: Setup rule "Monitoring coverage analysis".
 # ---------------------------------------------------------------------------
 _GENERIC_SUFFIX_RE = re.compile(r"\.(service|socket|timer|scope|exe)$", re.IGNORECASE)
 _GENERIC_CAMEL_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+")
 _GENERIC_MIN_LEN = 3
-# Familie wird unterdrueckt, wenn sie auf >= 80 % der Hosts desselben OS
-# vorkommt - nur bei mindestens 5 Hosts dieses OS.
+# A family is suppressed if it occurs on >= 80 % of the hosts of the same OS
+# - only if there are at least 5 hosts with this OS.
 _GENERIC_COMMON_MIN_HOSTS = 5
 _GENERIC_COMMON_RATIO = 0.8
 _GENERIC_MAX_EVIDENCE = 3
@@ -1046,7 +1044,7 @@ def _plugin_family(plugin: str) -> str:
 
 
 def _generic_name_tokens(*names: str) -> list[str]:
-    """Fuehrender Namensteil (plus erstes CamelCase-Wort) je Name:
+    """Leading name part (plus first CamelCase word) per name:
     'postgresql@15-main.service' -> ['postgresql'],
     'MSSQL$SQLEXPRESS' -> ['mssql'], 'MSExchangeIS' -> ['msexchangeis', 'ms']."""
     out: list[str] = []
@@ -1069,9 +1067,9 @@ def _generic_name_tokens(*names: str) -> list[str]:
 
 
 def _generic_token_matches(token: str, family: str) -> bool:
-    """Gleich, oder Familie ist Praefix mit kurzem Rest ('postgresql' ->
-    'postgres', 'mssqlserver' -> 'mssql'). Kurze Familien (3 Zeichen) nur
-    exakt."""
+    """Equal, or the family is a prefix with a short remainder ('postgresql' ->
+    'postgres', 'mssqlserver' -> 'mssql'). Short families (3 characters) only
+    exact."""
     if token == family:
         return True
     return len(family) >= 4 and token.startswith(family) and len(token) - len(family) <= 6
@@ -1080,23 +1078,23 @@ def _generic_token_matches(token: str, family: str) -> bool:
 class _GenericFamily(NamedTuple):
     title: str
     plugins: list[str]
-    # 0.9.0-b37: passende Datenquellen fuer den Hint (Agent-Plug-in-Dateien,
-    # Special Agents als (Name, Titel)); leer = nichts Passendes gefunden.
+    # 0.9.0-b37: matching data sources for the hint (agent plug-in files,
+    # special agents as (name, title)); empty = nothing matching found.
     agent_plugins: tuple[str, ...] = ()
     special_agents: tuple[tuple[str, str], ...] = ()
 
 
-# Verzeichnisse der verteilbaren Agent-Plug-ins (Linux/Unix und Windows),
-# jeweils Site-Version und local-Hierarchie (MKPs).
+# Directories of the deployable agent plug-ins (Linux/Unix and Windows),
+# each for the site version and the local hierarchy (MKPs).
 _AGENT_PLUGIN_DIRS = (
     "share/check_mk/agents/plugins",
     "share/check_mk/agents/windows/plugins",
     "local/share/check_mk/agents/plugins",
     "local/share/check_mk/agents/windows/plugins",
 )
-# Special Agents: ausfuehrbare Datei libexec/agent_<name> je Plug-in-Paket.
-# Ab 2.5 liegt ein Teil der Plug-in-Pakete (z.B. vsphere, proxmox_ve,
-# pure_storage_fa) unter lib/python3.<x>/site-packages/cmk/plugins.
+# Special agents: executable file libexec/agent_<name> per plug-in package.
+# As of 2.5, some of the plug-in packages (e.g. vsphere, proxmox_ve,
+# pure_storage_fa) are located under lib/python3.<x>/site-packages/cmk/plugins.
 _SPECIAL_AGENT_GLOBS = (
     "lib/python3/cmk/plugins/*/libexec/agent_*",
     "lib/python3.*/site-packages/cmk/plugins/*/libexec/agent_*",
@@ -1119,9 +1117,9 @@ def _family_matches(name: str, family: str) -> bool:
 
 
 def _data_sources() -> tuple[list[str], list[tuple[str, str]]]:
-    """(Agent-Plug-in-Dateien, [(Special-Agent-Name, Titel)]) der Site,
-    mit demselben TTL-Cache wie 'cmk -L'. Titel aus der Setup-Regel
-    (special_agents:<name>), sonst der Name."""
+    """(Agent plug-in files, [(special agent name, title)]) of the site,
+    with the same TTL cache as 'cmk -L'. Title from the Setup rule
+    (special_agents:<name>), otherwise the name."""
     now = time.time()
     cached = _available_plugins_cache.get("sources")
     if cached is not None and (now - cached[0]) < _AVAILABLE_PLUGINS_CACHE_TTL:
@@ -1148,7 +1146,7 @@ def _data_sources() -> tuple[list[str], list[tuple[str, str]]]:
         for name in specials:
             try:
                 specials[name] = str(rulespec_registry["special_agents:" + name].title or "")
-            except Exception:  # noqa: BLE001 - Titel ist nur Anzeige
+            except Exception:  # noqa: BLE001 - title is display only
                 pass
     except Exception:  # noqa: BLE001
         pass
@@ -1160,9 +1158,9 @@ def _data_sources() -> tuple[list[str], list[tuple[str, str]]]:
 def _sources_for_family(
     family: str, plugins: Sequence[str], sources: tuple[list[str], list[tuple[str, str]]]
 ) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
-    """Agent-Plug-ins und Special Agents, deren Name zur Familie passt
-    (gleich oder '<familie>_...'). Veraltete Special Agents nur, wenn es
-    keine anderen gibt."""
+    """Agent plug-ins and special agents whose name matches the family
+    (equal or '<family>_...'). Deprecated special agents only if there
+    are no others."""
     files, specials = sources
     names = {family} | {p.lower() for p in plugins}
     agent = tuple(f for f in files if _family_matches(_plugin_base(f), family))
@@ -1172,9 +1170,9 @@ def _sources_for_family(
 
 
 def _generic_catalog() -> dict[str, _GenericFamily]:
-    """Familie -> (Titel, Plug-ins) aller Agent-basierten Check-Plug-ins,
-    die NICHT von der Regel-Datei abgedeckt sind. Titel aus dem Katalog-
-    Titel ('ACME SBC: Health' -> 'ACME SBC')."""
+    """Family -> (title, plug-ins) of all agent-based check plug-ins
+    NOT covered by the rules file. Title derived from the catalog
+    title ('ACME SBC: Health' -> 'ACME SBC')."""
     grouped: dict[str, list[tuple[str, str]]] = {}
     for name, ptype, title in _cmk_list_plugins():
         if ptype != "agent":
@@ -1201,9 +1199,9 @@ def _generic_catalog() -> dict[str, _GenericFamily]:
 
 
 def _generic_sources(entry: _GenericFamily) -> str:
-    """0.9.0-b39: passende Datenquellen eines generischen Treffers fuer die
-    Detailzeile (Agent-Plug-ins/Special Agents); der Findings-Text selbst
-    bleibt kurz und verweist nur auf die Details."""
+    """0.9.0-b39: matching data sources of a generic match for the
+    detail line (agent plug-ins/special agents); the findings text itself
+    stays short and only refers to the details."""
     parts = []
     if entry.agent_plugins:
         parts.append(_("agent plug-in(s) %s") % ", ".join(entry.agent_plugins[:4]))
@@ -1217,9 +1215,9 @@ def _generic_sources(entry: _GenericFamily) -> str:
 
 
 def _generic_title(family: str, titles: Sequence[str]) -> str:
-    """Titel aus den Katalog-Titeln: gemeinsame fuehrende Woerter der Teile
-    vor ':' ('Couchbase Nodes: ...', 'Couchbase Buckets: ...' ->
-    'Couchbase'); ohne ':' im Katalog-Titel der Familienname."""
+    """Title from the catalog titles: common leading words of the parts
+    before ':' ('Couchbase Nodes: ...', 'Couchbase Buckets: ...' ->
+    'Couchbase'); without ':' in the catalog title, the family name."""
     prefixes = [t.split(":")[0].split() for t in titles if ":" in t]
     if not prefixes:
         return family.title()
@@ -1237,11 +1235,11 @@ def _generic_title(family: str, titles: Sequence[str]) -> str:
     return max(counts.items(), key=lambda kv: (kv[1], -len(kv[0])))[0]
 
 
-# 0.9.0-b28: Namensteile, die nur das Betriebssystem des Hosts nennen
-# ("Windows Update", "Windows Event Log"), sind kein Beleg fuer eine
-# Anwendung - sonst trifft z.B. die Plug-in-Familie "windows" auf jedem
-# Windows-Host. Gilt je Host fuer dessen OS (Labels cmk/os_type und
-# cmk/os_family), Hersteller-Familien bleiben unberuehrt.
+# 0.9.0-b28: name parts that only name the host's operating system
+# ("Windows Update", "Windows Event Log") are no evidence of an
+# application - otherwise e.g. the plug-in family "windows" would match on
+# every Windows host. Applies per host to its OS (labels cmk/os_type and
+# cmk/os_family); vendor families remain unaffected.
 _OS_NAME_TOKENS: Mapping[str, frozenset[str]] = {
     "windows": frozenset({"windows", "win", "microsoft"}),
     "linux": frozenset({"linux"}),
@@ -1252,7 +1250,7 @@ _OS_NAME_TOKENS: Mapping[str, frozenset[str]] = {
 
 
 def _os_name_tokens(labels: Mapping[str, str]) -> frozenset[str]:
-    """Namensteile, die das OS des Hosts bezeichnen (aus os_type/os_family)."""
+    """Name parts that denote the host's OS (from os_type/os_family)."""
     tokens: set[str] = set()
     for key in ("cmk/os_type", "cmk/os_family"):
         value = str(labels.get(key, "")).strip().lower()
@@ -1268,8 +1266,8 @@ def _generic_candidates(
     catalog: Mapping[str, _GenericFamily],
     os_tokens: frozenset[str] = frozenset(),
 ) -> dict[str, list[str]]:
-    """Familie -> Belege fuer einen Host (ohne OS-Haeufigkeitsfilter).
-    os_tokens: Namensteile des Host-OS, zaehlen nicht als Beleg."""
+    """Family -> evidence for one host (without OS frequency filter).
+    os_tokens: name parts of the host OS, do not count as evidence."""
     monitored_families = {
         _plugin_family(cmd[len("check_mk-"):].split("!")[0])
         for cmd in check_commands
@@ -1305,8 +1303,8 @@ def _generic_by_host(
     check_commands_by_host: Mapping[str, list[str]],
     catalog: Mapping[str, _GenericFamily],
 ) -> dict[str, dict[str, list[str]]]:
-    """Generische Kandidaten aller Hosts, ohne Familien, die auf fast allen
-    Hosts desselben OS (Label cmk/os_family) laufen."""
+    """Generic candidates of all hosts, excluding families that run on almost
+    all hosts of the same OS (label cmk/os_family)."""
     found_by_host: dict[str, dict[str, list[str]]] = {}
     os_by_host: dict[str, str] = {}
     hosts_per_os: dict[str, int] = {}
@@ -1346,10 +1344,10 @@ class _Subsystem(NamedTuple):
     via: list[str]
     evidence: list[str]
     severity: str  # "" (monitored) | "warn" | "crit"
-    # 0.9.0-b14: "delivered" (Section liefert Daten, Discovery fehlt) |
-    # "deployed" (Plug-in ausgeliefert, aber keine eigene Section - z.B.
-    # Ausgabe geht als Piggyback an andere Hosts) | "running" (Dienst/
-    # Prozess laeuft, Plug-in fehlt) | "label" (nur Host-Label)
+    # 0.9.0-b14: "delivered" (section delivers data, discovery missing) |
+    # "deployed" (plug-in deployed, but no own section - e.g. output goes
+    # as piggyback to other hosts) | "running" (service/process running,
+    # plug-in missing) | "label" (host label only)
     kind: str = ""
 
 
@@ -1359,41 +1357,41 @@ class _HostResult(NamedTuple):
     coverage_pct: int
     fraction_text: str
     findings: str
-    # Flache Darstellung inkl. Zwischenueberschriften ("Unmonitored:",
-    # "Already monitored:", "Sources:") - wird so 1:1 als Long Output des
-    # Piggyback-Service ausgegeben.
+    # Flat representation incl. subheadings ("Unmonitored:",
+    # "Already monitored:", "Sources:") - output 1:1 as the long output of
+    # the piggyback service.
     detail_lines: list[str]
     capability_summary: str
-    # 0.9.0-b13: strukturierte Detail-Abschnitte fuer die GUI-Seite. Defaults,
-    # damit aeltere Cache-Dateien (ohne diese Felder) weiter ladbar sind -
-    # die Seite faellt dann auf die flachen detail_lines zurueck.
+    # 0.9.0-b13: structured detail sections for the GUI page. Defaults so that
+    # older cache files (without these fields) can still be loaded - the
+    # page then falls back to the flat detail_lines.
     unmonitored_lines: list[str] = []
     monitored_lines: list[str] = []
     source_lines: list[str] = []
-    # 0.9.0-b21: ungefilterte Items (siehe lib/evaluate.py). Status und
-    # Texte oben sind die Auswertung OHNE Setup-Regel; Seite und Check
-    # werten die Items mit der fuer den Host gueltigen Regel neu aus.
+    # 0.9.0-b21: unfiltered items (see lib/evaluate.py). Status and texts
+    # above are the evaluation WITHOUT the Setup rule; page and check
+    # re-evaluate the items with the rule effective for the host.
     items: list[dict[str, Any]] = []
     candidate_lines: list[str] = []
     ignored_lines: list[str] = []
-    # Zaehler fuer die Gesamt-Coverage (nach Anwendung der Setup-Regel)
+    # Counters for the overall coverage (after applying the Setup rule)
     monitored_count: int = 0
     total_count: int = 0
 
 
 def _monitored_map_for_host(check_commands: Sequence[str]) -> dict[str, list[str]]:
-    """Ermittelt aus den Livestatus-check_command-Werten eines Hosts die
-    Menge der bereits ueberwachten (kanonisierten) Plugin-Tokens, je Token
-    mit den konkret ausloesenden Plugin-Namen (fuer die "via ..."-Anzeige).
+    """Determines, from a host's Livestatus check_command values, the set
+    of already monitored (canonicalized) plugin tokens, per token with the
+    concrete triggering plugin names (for the "via ..." display).
 
-    Checkmk-generierte Check-Commands haben das Praefix "check_mk-",
-    gefolgt vom Plugin-Namen, z.B. "check_mk-mysql_capacity" oder
-    "check_mk-apache_status". Der aktive Check fuer das HW/SW-Inventory
-    ("Checkmk HW/SW Inventory"-Service) hat stattdessen das Praefix
-    "check_mk_active-cmk_inv" (siehe Schritt 3 / T_SECTION "inventory"
-    oben) - wird hier explizit auf den Token "inventory" abgebildet,
-    damit "mk_inventory ist vorhanden, aber der HW/SW-Inventory-Service
-    laeuft nicht" korrekt als offenes Finding erkannt wird.
+    Checkmk-generated check commands have the prefix "check_mk-",
+    followed by the plugin name, e.g. "check_mk-mysql_capacity" or
+    "check_mk-apache_status". The active check for the HW/SW inventory
+    ("Checkmk HW/SW Inventory" service) instead has the prefix
+    "check_mk_active-cmk_inv" (see step 3 / T_SECTION "inventory"
+    above) - it is explicitly mapped to the token "inventory" here,
+    so that "mk_inventory is present, but the HW/SW inventory service
+    is not running" is correctly detected as an open finding.
     """
     result: dict[str, set[str]] = {}
     for cmd in check_commands:
@@ -1410,8 +1408,8 @@ def _monitored_map_for_host(check_commands: Sequence[str]) -> dict[str, list[str
 
 
 def _detail_sections_for(result: _HostResult, lookup: Any) -> list[tuple[str, list[str]]]:
-    """Detail-Abschnitte der Seite (gleiche Reihenfolge wie im Long Output
-    des Service); leere Abschnitte entfallen."""
+    """Detail sections of the page (same order as in the service's long
+    output); empty sections are omitted."""
     params = lookup.params_for(result.host_name) if result.items else {}
     mode = _ev.generic_mode(params)
     candidate_heading = (
@@ -1435,8 +1433,8 @@ def _detail_sections_for(result: _HostResult, lookup: Any) -> list[tuple[str, li
 def _monitored_elsewhere(
     token: str, host_name: str, check_commands_by_host: Mapping[str, Sequence[str]]
 ) -> list[tuple[str, str]]:
-    """[(Host, Check-Plug-in)] anderer Hosts, deren Check-Plug-in auf eine
-    Regex aus detect.<token>.monitored_elsewhere passt (re.fullmatch)."""
+    """[(host, check plug-in)] of other hosts whose check plug-in matches a
+    regex from detect.<token>.monitored_elsewhere (re.fullmatch)."""
     patterns = DETECT.get(token, {}).get("monitored_elsewhere", [])
     if not patterns:
         return []
@@ -1469,36 +1467,36 @@ def _analyze_host(
     discovery: Mapping[str, _DiscoveryCounts] | None = None,
     check_commands_by_host: Mapping[str, Sequence[str]] | None = None,
 ) -> _HostResult:
-    """Coverage-Korrelation fuer einen einzelnen Host (Stand 0.9.0-b14).
+    """Coverage correlation for a single host (as of 0.9.0-b14).
 
-    Belege je Token (Typ -> Liste), nur Tokens aus TITLES zaehlen:
-      - T_CHECK:   bereits aktiver check_command (Livestatus) - zugleich
-                   "ueberwacht".
-      - T_LABEL:   Host-Label (Name oder Wert) bildet auf das Token ab.
-      - T_SECTION: Section der Agent-Ausgabe (get-agent-output @cached),
-                   deren Name auf das Token abbildet und die echte Daten
-                   liefert (siehe _section_has_data()), oder eine
-                   detect.<token>.direct-Regel greift.
-      - T_PLUGIN:  ausgeliefertes Agent-Plug-in / Local Check laut
+    Evidence per token (type -> list), only tokens from TITLES count:
+      - T_CHECK:   already active check_command (Livestatus) - also
+                   "monitored".
+      - T_LABEL:   host label (name or value) maps to the token.
+      - T_SECTION: section of the agent output (get-agent-output @cached)
+                   whose name maps to the token and which delivers real
+                   data (see _section_has_data()), or a
+                   detect.<token>.direct rule matches.
+      - T_PLUGIN:  deployed agent plug-in / local check according to
                    checkmk_agent_plugins_lnx/_win.
-      - T_RUNTIME: detect.<token>.runtime-Regel greift (laufende
-                   systemd-Unit, Prozess ausserhalb von Containern,
-                   laufender Windows-Dienst).
+      - T_RUNTIME: detect.<token>.runtime rule matches (running
+                   systemd unit, process outside of containers,
+                   running Windows service).
 
-    Ein Token mit Beleg, fuer das auf der Site ein Check-Plugin existiert
-    (available_map), ist ein "monitorable subsystem". Ohne passenden
-    check_command ist es ein offenes Finding - seit b14 immer WARN, der
-    Text unterscheidet "Daten kommen an / Plug-in ausgeliefert" (Discovery
-    fehlt) von "laeuft" (Agent-Plug-in fehlt).
+    A token with evidence for which a check plugin exists on the site
+    (available_map) is a "monitorable subsystem". Without a matching
+    check_command it is an open finding - since b14 always WARN; the
+    text distinguishes "data arrives / plug-in deployed" (discovery
+    missing) from "running" (agent plug-in missing).
 
-    0.9.0-b21: dazu generische Kandidaten (generic_found, siehe
-    _generic_candidates()) und Rueckgabe der ungefilterten Items - die
-    Auswertung (Status, Coverage, Texte) macht lib/evaluate.py.
+    0.9.0-b21: additionally generic candidates (generic_found, see
+    _generic_candidates()) and return of the unfiltered items - the
+    evaluation (status, coverage, texts) is done by lib/evaluate.py.
 
-    Installierte Pakete aus dem HW/SW-Inventory (T_INV_PACKAGE) sind seit
-    b14 KEIN Beleg mehr (False Positives, z.B. lvm2 ohne ein einziges LV),
-    sondern nur eine Info-Zeile unter "Sources". Hosts ohne Agent-Ausgabe
-    (keine Cache-Datei) haben damit nur noch T_CHECK/T_LABEL.
+    Installed packages from the HW/SW inventory (T_INV_PACKAGE) are NO
+    longer evidence since b14 (false positives, e.g. lvm2 without a single
+    LV), but only an info line under "Sources". Hosts without agent output
+    (no cache file) thus only have T_CHECK/T_LABEL.
     """
     monitored_map = _monitored_map_for_host(check_commands)
     inv_packages = _inventory_package_names(host_name)
@@ -1508,7 +1506,7 @@ def _analyze_host(
     agent_plugins = _agent_plugin_names(raw_sections)
     runtime = _runtime_facts(raw_sections)
 
-    # Kapabilitaeten je Token sammeln (Typ -> Belege).
+    # Collect capabilities per token (type -> evidence).
     capability_evidence: dict[str, dict[str, list[str]]] = {}
 
     def _add_capability(token: str, cap_type: str, evidence: str) -> None:
@@ -1517,9 +1515,9 @@ def _analyze_host(
         if evidence not in items:
             items.append(evidence)
 
-    # T_CHECK (0.9.0-b6): ein bereits aktiver, ueberwachter check_command
-    # ist selbst ein Kapabilitaets-Beleg (siehe Docstring oben) - rein
-    # generisch ueber TITLES (JSON-gespeist), keine Subsystem-Sonderfaelle.
+    # T_CHECK (0.9.0-b6): an already active, monitored check_command is
+    # itself capability evidence (see docstring above) - purely generic
+    # via TITLES (JSON-fed), no subsystem special cases.
     for token, plugin_names in monitored_map.items():
         if token in TITLES:
             _add_capability(token, T_CHECK, f"check_command(s)='{', '.join(plugin_names)}'")
@@ -1530,8 +1528,8 @@ def _analyze_host(
             if token in TITLES:
                 _add_capability(token, T_LABEL, f"host_label='{name}:{value}'")
 
-    # T_SECTION (0.9.0-b14): Section-Name -> Token, nur wenn die Section
-    # echte Daten liefert (leere Section / nur "[df]"-Kopf zaehlt nicht).
+    # T_SECTION (0.9.0-b14): section name -> token, only if the section
+    # delivers real data (empty section / only "[df]" header does not count).
     for section_name, lines in raw_sections.items():
         if section_name in SECTION_IGNORE:
             continue
@@ -1546,8 +1544,8 @@ def _analyze_host(
         if token in TITLES and token not in STOP_TOKENS:
             _add_capability(token, T_PLUGIN, f"agent plug-in '{plugin}' deployed")
 
-    # detect-Regeln: "direct" wirkt wie T_SECTION (Daten kommen an),
-    # "runtime" ist der indirekte Beleg (Dienst/Prozess laeuft).
+    # detect rules: "direct" acts like T_SECTION (data arrives),
+    # "runtime" is the indirect evidence (service/process running).
     for token, spec in DETECT.items():
         if token not in TITLES:
             continue
@@ -1557,10 +1555,10 @@ def _analyze_host(
                 if hit:
                     _add_capability(token, cap_type, hit)
 
-    # 0.9.0-b17: detect.<token>.not_on_os - Plug-in laeuft auf diesem
-    # Betriebssystem nicht (z.B. openvpn_clients ist ein Bash-Skript, kein
-    # Windows-Plug-in). Vergleich gegen das Host-Label cmk/os_family;
-    # ohne Label keine Einschraenkung.
+    # 0.9.0-b17: detect.<token>.not_on_os - plug-in does not run on this
+    # operating system (e.g. openvpn_clients is a Bash script, not a
+    # Windows plug-in). Compared against the host label cmk/os_family;
+    # no label means no restriction.
     os_family = str(labels.get("cmk/os_family", "")).strip().lower()
 
     def _os_excluded(token: str) -> bool:
@@ -1573,9 +1571,9 @@ def _analyze_host(
             continue
         available_names = available_map.get(token)
         if not available_names:
-            # Kapabilitaet erkannt, aber auf dieser Site gar kein
-            # passendes Check-Plugin verfuegbar - kein "monitorable
-            # subsystem" (nur verfuegbare Plugins zaehlen in den Bruch).
+            # Capability detected, but no matching check plugin available
+            # on this site at all - not a "monitorable subsystem" (only
+            # available plugins count in the fraction).
             continue
         title = TITLES.get(token, token)
         by_type = capability_evidence[token]
@@ -1589,10 +1587,10 @@ def _analyze_host(
                 )
             )
             continue
-        # 0.9.0-b14: alle offenen Findings erstmal WARN (User-Vorgabe, im
-        # Livebetrieb zu bewerten). Die Art des Belegs bestimmt nur den
-        # Text: Daten kommen schon an -> Discovery fehlt; Dienst laeuft ->
-        # Agent-Plug-in fehlt.
+        # 0.9.0-b14: all open findings WARN for now (user requirement, to be
+        # assessed in production). The type of evidence only determines the
+        # text: data already arrives -> discovery missing; service running ->
+        # agent plug-in missing.
         if T_SECTION in by_type:
             kind = "delivered"
         elif T_PLUGIN in by_type:
@@ -1608,8 +1606,8 @@ def _analyze_host(
             )
         )
 
-    # 0.9.0-b21: ungefilterte Items; Status/Coverage/Texte entstehen in
-    # lib/evaluate.py (gemeinsam mit dem Check-Plugin).
+    # 0.9.0-b21: unfiltered items; status/coverage/texts are produced in
+    # lib/evaluate.py (shared with the check plugin).
     items: list[dict[str, Any]] = []
     for s in subsystems:
         if s.monitored:
@@ -1620,9 +1618,9 @@ def _analyze_host(
             continue
         elsewhere = _monitored_elsewhere(s.token, host_name, check_commands_by_host or {})
         if elsewhere:
-            # 0.9.0-b40: detect.<token>.monitored_elsewhere - wird zentral auf
-            # einem anderen Host ueberwacht (z.B. Entra Connect Sync ueber den
-            # Azure-Special-Agent am Tenant-Host), nicht auf diesem Server.
+            # 0.9.0-b40: detect.<token>.monitored_elsewhere - monitored
+            # centrally on another host (e.g. Entra Connect Sync via the Azure
+            # special agent on the tenant host), not on this server.
             shown = ", ".join(f"{h} ({p})" for h, p in elsewhere[:3])
             if len(elsewhere) > 3:
                 shown += f", ... (+{len(elsewhere) - 3})"
@@ -1634,9 +1632,9 @@ def _analyze_host(
             })
             continue
         if s.kind == "deployed" and agent_sections is not None and agent_sections.piggyback:
-            # 0.9.0-b26: Plug-in verteilt, liefert aber nur Piggyback-Daten
-            # fuer andere Hosts (z.B. oxidized). Abgedeckt, wenn das Plugin
-            # auf allen Ziel-Hosts ueberwacht wird.
+            # 0.9.0-b26: plug-in deployed, but only delivers piggyback data
+            # for other hosts (e.g. oxidized). Covered if the plugin is
+            # monitored on all target hosts.
             targets = sorted({
                 t for name, hosts in agent_sections.piggyback.items()
                 if _canonical_token(name) == s.token for t in hosts
@@ -1658,7 +1656,7 @@ def _analyze_host(
                         % (len(targets), len(monitored_on), len(targets)),
                     })
                     continue
-                # Ziel-Host ohne jeden Service = in Checkmk nicht angelegt
+                # Target host without any service = not created in Checkmk
                 unknown = [t for t in missing if t.lower() not in by_lower]
                 undiscovered = [t for t in missing if t.lower() in by_lower]
                 hints = []
@@ -1675,10 +1673,10 @@ def _analyze_host(
                 })
                 continue
         if s.kind == "deployed":
-            # 0.9.0-b26: Plug-in verteilt, Section-Header kommt an, aber ohne
-            # Daten - fuer Sections aus empty_ok ein gueltiger Zustand (z.B.
-            # windows_tasks: keine Tasks, die der Agent meldet). Das
-            # Plug-in ist verteilt, es gibt nichts zu ueberwachen.
+            # 0.9.0-b26: plug-in deployed, section header arrives, but without
+            # data - a valid state for sections from empty_ok (e.g.
+            # windows_tasks: no tasks reported by the agent). The
+            # plug-in is deployed, there is nothing to monitor.
             empty = sorted(
                 name for name in EMPTY_OK
                 if name in raw_sections
@@ -1695,10 +1693,9 @@ def _analyze_host(
                 })
                 continue
         if s.kind in ("delivered", "deployed") and discovery:
-            # 0.9.0-b23: Plug-in liefert Daten, und ueber ALLE Services der
-            # Plugins dieses Subsystems wurde entschieden (mind. einer per
-            # Regel deaktiviert, keiner offen) -> bewusst so gewollt, zaehlt
-            # als abgedeckt.
+            # 0.9.0-b23: plug-in delivers data, and ALL services of this
+            # subsystem's plugins have been decided (at least one disabled
+            # by rule, none open) -> intentional, counts as covered.
             ignored_n = sum(discovery[p].ignored for p in s.via if p in discovery)
             undecided_n = sum(discovery[p].unmonitored for p in s.via if p in discovery)
             if ignored_n and not undecided_n:
@@ -1714,12 +1711,12 @@ def _analyze_host(
             "running": _("running, not monitored"),
         }.get(s.kind, _("detected, not monitored"))
         if s.kind == "delivered":
-            # Daten sind schon da - ein Plug-in-Deployment-Hinweis waere
-            # hier falsch, es fehlt nur die Service-Discovery.
+            # Data is already there - a plug-in deployment hint would be
+            # wrong here, only the service discovery is missing.
             hint = _("Run service discovery for this host.")
         elif s.kind == "deployed":
-            # 0.9.0-b26: Plug-in verteilt, liefert aber keine Daten - eine
-            # Discovery wuerde nichts finden, das Plug-in selbst pruefen.
+            # 0.9.0-b26: plug-in deployed, but delivers no data - a discovery
+            # would find nothing, check the plug-in itself.
             hint = _(
                 "The agent plug-in is deployed but delivers no data - check "
                 "the plug-in (configuration, permissions, timeouts), then run "
@@ -1732,8 +1729,8 @@ def _analyze_host(
             "plugins": list(s.via), "evidence": list(s.evidence),
             "state": state_txt, "hint": hint,
         })
-    # 0.9.0-b27: Remote-Site nicht erreichbar -> Analyse unvollstaendig,
-    # sichtbar als Finding statt still OK (nur auf Check-Commands gestuetzt).
+    # 0.9.0-b27: remote site unreachable -> analysis incomplete, visible
+    # as a finding instead of silently OK (based on check commands only).
     if agent_sections.site_error:
         items.append({
             "kind": "open", "token": "remote_site_unreachable",
@@ -1755,8 +1752,8 @@ def _analyze_host(
         items.append({
             "kind": "candidate", "token": f"generic:{family}", "title": entry.title,
             "plugins": list(entry.plugins), "evidence": shown,
-            # 0.9.0-b39: kurzer Findings-Text; Check-Plug-ins und Datenquellen
-            # stehen in der Detailzeile (siehe lib/evaluate.py _item_line).
+            # 0.9.0-b39: short findings text; check plug-ins and data sources
+            # are in the detail line (see lib/evaluate.py _item_line).
             "state": _("possible match (fuzzy search)"),
             "hint": _("See details for potential checks."),
             "sources": _generic_sources(entry),
@@ -1771,10 +1768,9 @@ def _analyze_host(
         ", ".join(f"{t}:{c}" for t, c in type_counts.items() if c) or "-"
     )
     source_lines.append(capability_summary)
-    # T_INV_PACKAGE (0.9.0-b14): nur Info - Pakete, die auf ein
-    # verfuegbares, nicht ueberwachtes Subsystem hindeuten, fuer das die
-    # Agent-Ausgabe aber keinen Beleg liefert. Beeinflusst weder Status
-    # noch Coverage.
+    # T_INV_PACKAGE (0.9.0-b14): info only - packages that indicate an
+    # available, unmonitored subsystem for which the agent output provides
+    # no evidence. Affects neither status nor coverage.
     subsystem_tokens = {s.token for s in subsystems}
     pkg_only: dict[str, list[str]] = {}
     for pkg in inv_packages:
@@ -1799,8 +1795,8 @@ def _analyze_host(
     source_lines.append(
         _("Inventory packages: %d (HW/SW inventory, info only)") % len(inv_packages)
     )
-    # Transparenz: ohne Agent-Ausgabe gibt es keine Section-/Laufzeit-
-    # Belege - das soll sichtbar sein.
+    # Transparency: without agent output there is no section/runtime
+    # evidence - this should be visible.
     if agent_sections.error:
         source_lines.append(
             _("Agent sections: unavailable via %s (%s)")
@@ -1821,8 +1817,8 @@ def _build_result(
     capability_summary: str,
     params: Mapping[str, Any] | None,
 ) -> _HostResult:
-    """Auswertung der Items mit den Parametern der Setup-Regel (None = ohne
-    Regel, Default-Verhalten) -> _HostResult fuer Anzeige/Cache."""
+    """Evaluate the items with the parameters of the setup rule (None = no
+    rule, default behavior) -> _HostResult for display/cache."""
     evaluation = _ev.evaluate(items, params)
     mode = _ev.generic_mode(params)
     return _HostResult(
@@ -1844,11 +1840,11 @@ def _build_result(
     )
 
 
-# 0.9.0-b23: Entscheidungen des Anwenders aus dem "Check_MK Discovery"-
-# Service (Long Output): "Service ignored: <plugin>: <item>" = per Regel
-# deaktiviert, "Service unmonitored: <plugin>: <item>" = noch nicht
-# entschieden. Dient NICHT zur Erkennung von Subsystemen, nur dazu, ein
-# "agent delivers data"-Finding als bewusst entschieden zu erkennen.
+# 0.9.0-b23: User decisions from the "Check_MK Discovery" service (long
+# output): "Service ignored: <plugin>: <item>" = disabled via rule,
+# "Service unmonitored: <plugin>: <item>" = not yet decided. NOT used to
+# detect subsystems, only to recognize an "agent delivers data" finding as
+# deliberately decided.
 _DISCOVERY_LINE_RE = re.compile(r"^Service (ignored|unmonitored): ([^:\s]+): ")
 
 
@@ -1858,8 +1854,8 @@ class _DiscoveryCounts(NamedTuple):
 
 
 def _parse_discovery_output(long_output: str) -> dict[str, _DiscoveryCounts]:
-    """Long Output des Discovery-Service -> Plugin -> Anzahl ignorierter /
-    unentschiedener Services. Livestatus liefert Zeilenumbrueche als '\\n'."""
+    """Long output of the discovery service -> plugin -> number of ignored /
+    undecided services. Livestatus returns line breaks as '\\n'."""
     ignored: dict[str, int] = {}
     unmonitored: dict[str, int] = {}
     for line in long_output.replace("\\n", "\n").splitlines():
@@ -1875,14 +1871,14 @@ def _parse_discovery_output(long_output: str) -> dict[str, _DiscoveryCounts]:
 
 
 def _discovery_states(connection: Any) -> dict[str, dict[str, _DiscoveryCounts]]:
-    """Host -> Plugin -> _DiscoveryCounts, eine Livestatus-Query pro Lauf."""
+    """Host -> plugin -> _DiscoveryCounts, one Livestatus query per run."""
     try:
         rows = connection.query(
             "GET services\n"
             "Columns: host_name long_plugin_output\n"
             "Filter: check_command = check-mk-inventory\n"
         )
-    except Exception:  # pragma: no cover - defensiv, GUI-Kontext
+    except Exception:  # pragma: no cover - defensive, GUI context
         return {}
     return {
         host_name: _parse_discovery_output(long_output or "")
@@ -1891,25 +1887,25 @@ def _discovery_states(connection: Any) -> dict[str, dict[str, _DiscoveryCounts]]
     }
 
 
-# 0.9.0-b22: Betriebssysteme, deren Hosts analysiert werden.
+# 0.9.0-b22: Operating systems whose hosts are analyzed.
 _AGENT_OS_TYPES = frozenset({"linux", "windows", "freebsd", "solaris", "aix"})
 
 
 def _host_os(labels: Mapping[str, str]) -> str:
-    """OS des Hosts aus den Agent-Labels: cmk/os_type (z.B. "linux" auch
-    fuer UniFi OS / OpenWrt, deren cmk/os_family abweicht), bei aelteren
-    Agenten ohne cmk/os_type ersatzweise cmk/os_family."""
+    """OS of the host from the agent labels: cmk/os_type (e.g. "linux" also
+    for UniFi OS / OpenWrt, whose cmk/os_family differs); for older agents
+    without cmk/os_type, cmk/os_family as a fallback."""
     value = labels.get("cmk/os_type") or labels.get("cmk/os_family") or ""
     return str(value).strip().lower()
 
 
-# Laufzeit des letzten Analyse-Laufs in diesem Prozess (Sekunden), wird von
-# _save_cached_results() in die Cache-Datei uebernommen.
+# Duration of the last analysis run in this process (seconds); copied into
+# the cache file by _save_cached_results().
 _last_run_duration: list[float] = []
 
 
 def _query_and_analyze_hosts() -> Sequence[_HostResult]:
-    """Analyse-Lauf mit Laufzeitmessung, siehe _query_and_analyze_hosts_impl()."""
+    """Analysis run with duration measurement, see _query_and_analyze_hosts_impl()."""
     started = time.monotonic()
     try:
         return _query_and_analyze_hosts_impl()
@@ -1918,32 +1914,32 @@ def _query_and_analyze_hosts() -> Sequence[_HostResult]:
 
 
 def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
-    """Ermittelt per Livestatus alle Hosts, die per Checkmk-Agent (TCP)
-    ueberwacht werden, und wendet auf jeden Host die Coverage-Korrelation
-    aus _analyze_host() an.
+    """Determines via Livestatus all hosts monitored by the Checkmk agent
+    (TCP) and applies the coverage correlation from _analyze_host() to each
+    host.
 
-    Die Filterung nach "agent = cmk-agent" erfolgt Python-seitig ueber die
-    von Livestatus gelieferte tags-Spalte (statt als Livestatus-Filter-Zeile),
-    weil Checkmk 2.5 fuer Host-Tag-Filter das Format
-    "Filter: tags = <tag_group_id> <tag_id>" erwartet und keine
-    "tags_<tag_group_id> = <tag_id>"-Kurzschreibweise mehr unterstuetzt.
+    Filtering by "agent = cmk-agent" is done on the Python side using the
+    tags column returned by Livestatus (instead of a Livestatus filter line),
+    because Checkmk 2.5 expects the format
+    "Filter: tags = <tag_group_id> <tag_id>" for host tag filters and no
+    longer supports the "tags_<tag_group_id> = <tag_id>" shorthand.
     """
     connection = sites.live()
     try:
         _reload_rules()
     except RulesLoadError as exc:
-        # Rein daten-basierte Regel-Erkennung (siehe Modul-Docstring): kein
-        # stiller Code-Fallback. Ein Problem mit der Regel-Datei fuehrt zu
-        # einem klaren, fuer den Benutzer sichtbaren Fehler statt zu einem
-        # Analyse-Ergebnis unklarer Herkunft.
+        # Purely data-based rule detection (see module docstring): no silent
+        # code fallback. A problem with the rule file leads to a clear error
+        # visible to the user instead of an analysis result of unclear
+        # origin.
         html.show_error(
-            "Coverage-Regeln konnten nicht geladen werden - Analyse "
-            f"abgebrochen: {exc}"
+            "Coverage rules could not be loaded - analysis "
+            f"aborted: {exc}"
         )
         return []
     try:
-        # 0.9.0-b27: Site je Host (Distributed Monitoring), damit die
-        # Agent-Ausgabe von der zustaendigen Site geholt wird.
+        # 0.9.0-b27: Site per host (distributed monitoring), so that the
+        # agent output is fetched from the responsible site.
         with sites.prepend_site():
             site_rows = connection.query(
                 "GET hosts\n"
@@ -1951,16 +1947,15 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
             )
         rows = [row[1:] for row in site_rows]
         host_sites = {row[1]: row[0] for row in site_rows}
-        # services_with_info/-fullstate liefern KEIN check_command; dafuer
-        # separat alle Service-Check-Commands je Host abfragen (eine
-        # einzige Livestatus-Query fuer den gesamten Analyse-Lauf, nicht
-        # pro Host).
+        # services_with_info/-fullstate do NOT return check_command; so query
+        # all service check commands per host separately (a single
+        # Livestatus query for the entire analysis run, not per host).
         service_rows = connection.query(
             "GET services\n"
             "Columns: host_name check_command\n"
         )
     except Exception as exc:  # pragma: no cover - debug aid
-        html.show_error(f"Livestatus-Fehler: {exc!r}")
+        html.show_error(f"Livestatus error: {exc!r}")
         return []
 
     check_commands_by_host: dict[str, list[str]] = {}
@@ -1968,19 +1963,19 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
         if isinstance(check_command, str) and check_command:
             check_commands_by_host.setdefault(host_name, []).append(check_command)
 
-    # "cmk -L" GENAU EINMAL fuer den gesamten Analyse-Lauf, nicht pro Host.
+    # "cmk -L" EXACTLY ONCE for the entire analysis run, not per host.
     available_map = _available_plugin_map()
     discovery_by_host = _discovery_states(connection)
 
     agent_rows: list[tuple[str, dict[str, str]]] = []
     for host_name, tags, labels in rows:
-        # Hinweis: Checkmk erlaubt eigene IDs fuer die Tag-Gruppe "agent"
-        # (z.B. "all-agents" statt des Default-Werts "cmk-agent") - eine
-        # Pruefung auf tags["agent"] == "cmk-agent" ist daher NICHT
-        # site-unabhaengig. Robuster ist das eingebaute "tcp"-Hilfs-Tag
-        # (aux_tag "tcp"), das gesetzt ist, sobald ein Host per
-        # Checkmk-Agent (TCP) kontaktiert wird - unabhaengig von der
-        # konkreten Tag-Gruppen-/ID-Konfiguration der Site.
+        # Note: Checkmk allows custom IDs for the "agent" tag group (e.g.
+        # "all-agents" instead of the default value "cmk-agent") - a check
+        # for tags["agent"] == "cmk-agent" is therefore NOT site-independent.
+        # More robust is the built-in "tcp" auxiliary tag (aux_tag "tcp"),
+        # which is set as soon as a host is contacted via the Checkmk agent
+        # (TCP) - independent of the site's specific tag group/ID
+        # configuration.
         tag_map = tags if isinstance(tags, dict) else {}
         is_cmk_agent_host = tag_map.get("tcp") == "tcp" or tag_map.get(
             "checkmk-agent"
@@ -1988,21 +1983,21 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
         if not is_cmk_agent_host:
             continue
         label_map = labels if isinstance(labels, dict) else {}
-        # 0.9.0-b22: das tcp-Tag allein ist zu unscharf (auch Special-Agent-
-        # und Piggyback-Hosts, Router mit eigenem Agenten). Zusaetzlich muss
-        # der Agent ein Betriebssystem melden, fuer das es Agent-Plug-ins
-        # gibt - siehe _host_os().
+        # 0.9.0-b22: the tcp tag alone is too imprecise (also special agent
+        # and piggyback hosts, routers with their own agent). Additionally,
+        # the agent must report an operating system for which agent plug-ins
+        # exist - see _host_os().
         if _host_os(label_map) not in _AGENT_OS_TYPES:
             continue
         agent_rows.append((host_name, label_map))
 
-    # 0.9.0-b7: Agent-Ausgaben aller Hosts EINMAL pro Lauf, parallel, aus
-    # dem Core-Cache (get-agent-output @cached) - keine Agent-Abfrage.
+    # 0.9.0-b7: Agent outputs of all hosts ONCE per run, in parallel, from
+    # the core cache (get-agent-output @cached) - no agent query.
     sections_by_host = _collect_agent_sections([h for h, _labels in agent_rows], host_sites)
 
-    # 0.9.0-b21: generischer Abgleich - erst fuer alle Hosts sammeln, dann
-    # Familien entfernen, die auf fast allen Hosts desselben OS laufen
-    # (Basis-OS-Bestandteile, ohne gepflegte Liste).
+    # 0.9.0-b21: generic matching - first collect for all hosts, then remove
+    # families that run on almost all hosts of the same OS (base OS
+    # components, without a maintained list).
     catalog = _generic_catalog()
     generic_by_host = _generic_by_host(agent_rows, sections_by_host, check_commands_by_host, catalog)
 
@@ -2025,10 +2020,10 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
     return results
 
 
-# 0.9.0-b25: Cache-Datei, Piggyback-Schreiben und Laufzustand liegen in
-# lib/runstate.py (ohne GUI-Importe) - das Cron-Skript nutzt sie fuer die
-# schnellen Wege ohne die GUI hochzufahren. Hier nur duenne Adapter auf
-# _HostResult.
+# 0.9.0-b25: Cache file, piggyback writing and run state live in
+# lib/runstate.py (without GUI imports) - the cron script uses them for the
+# fast paths without starting up the GUI. Only thin adapters to
+# _HostResult here.
 
 
 def _cache_path() -> str | None:
@@ -2041,9 +2036,9 @@ def _save_cached_results(
     last_full_run_timestamp: float | None = None,
     last_piggyback_refresh_timestamp: float | None = None,
 ) -> None:
-    """Persistiert das Ergebnis (JSON-Datei, gemeinsam fuer alle Apache-
-    Worker). Laufzeit: aus dem Lauf dieses Prozesses, sonst bleibt die
-    zuletzt gespeicherte erhalten."""
+    """Persists the result (JSON file, shared by all Apache workers).
+    Duration: from this process's run, otherwise the last stored value is
+    kept."""
     _rs.save_results(
         [r._asdict() for r in results],
         last_full_run_timestamp=last_full_run_timestamp,
@@ -2057,9 +2052,9 @@ def _load_cache_raw() -> dict[str, Any] | None:
 
 
 def _cached_run_duration() -> float | None:
-    """Dauer des letzten erfolgreichen Laufs: bevorzugt die Gesamtdauer des
-    Hintergrund-Laufs (inkl. Hochfahren der GUI), sonst die in der Cache-
-    Datei gespeicherte reine Analysezeit."""
+    """Duration of the last successful run: preferably the total duration of
+    the background run (incl. starting up the GUI), otherwise the pure
+    analysis time stored in the cache file."""
     job = _rs.load_job_state()
     started, finished = job.get("started"), job.get("finished")
     if job.get("state") == "done" and isinstance(started, (int, float)) and isinstance(finished, (int, float)):
@@ -2083,7 +2078,7 @@ def _load_cached_results() -> tuple[float, Sequence[_HostResult]] | None:
         return None
     fields = set(_HostResult._fields)
     try:
-        # Unbekannte Felder (z.B. aus einer neueren Version) ignorieren
+        # Ignore unknown fields (e.g. from a newer version)
         results = [
             _HostResult(**{k: v for k, v in row.items() if k in fields})
             for row in payload["results"]
@@ -2094,8 +2089,8 @@ def _load_cached_results() -> tuple[float, Sequence[_HostResult]] | None:
 
 
 def _run_piggyback_full(results: Sequence[_HostResult]) -> tuple[int, str | None, float]:
-    """Piggyback-Daten mit NEUEM Inhalt direkt nach einem Analyse-Lauf:
-    beide Zeitstempel auf 'jetzt', Ergebnis in die Cache-Datei."""
+    """Piggyback data with NEW content directly after an analysis run:
+    both timestamps set to 'now', result written to the cache file."""
     now = time.time()
     rows = [r._asdict() for r in results]
     written, error = _rs.write_piggyback(
@@ -2117,10 +2112,9 @@ def _run_piggyback_refresh() -> tuple[int, str | None]:
 
 
 def _run_analysis_and_store() -> tuple[int, int, str | None]:
-    """Kompletter Analyse-Lauf inkl. Speichern (und Piggyback, falls
-    aktiviert). Wird vom Cron-Skript aufgerufen (fullrun/rerun), nicht mehr
-    aus dem Apache-Request. Rueckgabe: (Hosts, Piggyback geschrieben,
-    Fehler)."""
+    """Complete analysis run incl. storing (and piggyback, if enabled).
+    Called by the cron script (fullrun/rerun), no longer from the Apache
+    request. Returns: (hosts, piggyback written, error)."""
     results = _query_and_analyze_hosts()
     if _generate_piggyback_data_enabled():
         written, error, _now = _run_piggyback_full(results)
@@ -2130,46 +2124,45 @@ def _run_analysis_and_store() -> tuple[int, int, str | None]:
 
 
 def _perfometer_style(coverage_pct: int, status: str | None = None) -> str:
-    """Schritt 1c: inline-CSS-Hintergrund analog zum Perf-o-Meter-Stil in
-    Checkmk-Views - ein horizontaler linear-gradient-Balken, dessen
-    gefuellter Anteil coverage_pct entspricht. Farben 1:1 aus den echten
-    Ampelfarben des laufenden Systems uebernommen (siehe
+    """Step 1c: inline CSS background analogous to the Perf-o-Meter style in
+    Checkmk views - a horizontal linear-gradient bar whose filled portion
+    corresponds to coverage_pct. Colors taken 1:1 from the actual traffic
+    light colors of the running system (see
     themes/facelift/theme.css: .state0{background-color:#13d389},
     .state1{background-color:#ffd703}, .state2{background-color:#c83232}),
-    damit Perfometer und Status-Spalte farblich konsistent sind.
-    Abgerundete Ecken analog zu span.state_rounded_fill (border-radius:2px)
-    in der normalen Service-Tabelle. Schrift bewusst schwarz, wie es
-    Checkmk fuer state0/state1 (helle Hintergruende) ebenfalls tut.
+    so that perfometer and status column are color-consistent.
+    Rounded corners analogous to span.state_rounded_fill (border-radius:2px)
+    in the normal service table. Font deliberately black, as Checkmk also
+    does for state0/state1 (light backgrounds).
     """
     pct = max(0, min(100, coverage_pct))
-    # 0.9.0-b29: je Host bestimmt der Status die Farbe (die Status-Spalte
-    # entfaellt) - sonst waere ein WARN-Host mit 92 % gruen. Ohne Status
-    # (Gesamt-Balken) weiter nach Prozent.
+    # 0.9.0-b29: per host the status determines the color (the status column
+    # is dropped) - otherwise a WARN host with 92 % would be green. Without
+    # status (total bar) still by percentage.
     by_status = {"OK": "#13d389", "WARN": "#ffd703", "CRIT": "#c83232"}
     if status is not None:
-        fill = by_status.get(status, "#a0a0a0")  # UNKNOWN grau
+        fill = by_status.get(status, "#a0a0a0")  # UNKNOWN gray
     elif pct >= 90:
-        fill = "#13d389"  # gruen, wie state0
+        fill = "#13d389"  # green, like state0
     elif pct >= 50:
-        fill = "#ffd703"  # gelb, wie state1
+        fill = "#ffd703"  # yellow, like state1
     else:
-        fill = "#c83232"  # rot, wie state2
+        fill = "#c83232"  # red, like state2
     return (
         f"background: linear-gradient(to right, {fill} 0%, {fill} {pct}%, "
         f"#e0e0e0 {pct}%, #e0e0e0 100%); text-align:center; font-weight:bold; "
         "color:#000; border-radius:4px;"
     )
 
-
 def _host_link(host_name: str) -> HTML:
-    """Schritt 1b: anklickbarer Link auf die "Service of host"-Seite,
-    identisch zur Konvention normaler Checkmk-Views. Live auf der
-    Test-Site nachgeschlagen: der eingebaute View-Name fuer die
-    Host-Detailansicht (Services eines einzelnen Hosts) ist "host",
-    aufgerufen als view.py?view_name=host&host=<hostname> - siehe
-    cmk.gui.views.builtin_views (View-ID "host") und
-    cmk.gui.utils.urls.makeuri_contextless(), das genau diese
-    Kontextlos-URLs fuer Views baut.
+    """Step 1b: clickable link to the "Service of host" page,
+    identical to the convention of regular Checkmk views. Looked up live on
+    the test site: the built-in view name for the host detail view
+    (services of a single host) is "host", called as
+    view.py?view_name=host&host=<hostname> - see
+    cmk.gui.views.builtin_views (view ID "host") and
+    cmk.gui.utils.urls.makeuri_contextless(), which builds exactly these
+    context-less URLs for views.
     """
     href = makeuri_contextless(
         request, [("view_name", "host"), ("host", host_name)], filename="view.py"
@@ -2178,7 +2171,7 @@ def _host_link(host_name: str) -> HTML:
 
 
 # ---------------------------------------------------------------------------
-# Ausbaustufe 2.0.0: Zugriff auf die globalen Setup-Optionen (siehe
+# Expansion stage 2.0.0: access to the global Setup options (see
 # plugins/wato/monitoring_coverage_analyzer_globals.py /
 # plugins/config/monitoring_coverage_analyzer.py).
 # ---------------------------------------------------------------------------
@@ -2196,10 +2189,10 @@ def _is_full_run_due(*, force: bool) -> tuple[bool, str]:
     return _rs.is_full_run_due(force=force)
 
 
-# 0.9.0-b21: Setup-Regel "Monitoring coverage analysis" (rulesets/
-# monitoring_coverage.py) - dieselbe Regel, die das Check-Plugin als
-# Parameter bekommt. Die Seite wertet sie pro Host ueber die Checkmk-
-# eigene Regelauswertung aus (wie "Effective parameters of" im Setup).
+# 0.9.0-b21: Setup rule "Monitoring coverage analysis" (rulesets/
+# monitoring_coverage.py) - the same rule the check plug-in receives as
+# parameters. The page evaluates it per host via Checkmk's own rule
+# evaluation (like "Effective parameters of" in Setup).
 _RULESET_NAME = "checkgroup_parameters:checkmk_monitoring_coverage"
 
 
@@ -2215,7 +2208,7 @@ class _RuleLookup:
             ruleset = rulesets.get(_RULESET_NAME)
             if ruleset is not None and not ruleset.is_empty():
                 self._ruleset = ruleset
-        except Exception as exc:  # pragma: no cover - defensiv, GUI-Kontext
+        except Exception as exc:  # pragma: no cover - defensive, GUI context
             self.error = f"{exc!r}"
 
     @property
@@ -2234,21 +2227,21 @@ class _RuleLookup:
             value, _rules = self._ruleset.analyse_ruleset(
                 host_name, None, PIGGYBACK_SERVICE_TITLE, {}, debug=False
             )
-        except Exception as exc:  # pragma: no cover - defensiv, GUI-Kontext
+        except Exception as exc:  # pragma: no cover - defensive, GUI context
             self.error = f"{host_name}: {exc!r}"
             return {}
         if isinstance(value, dict) and "tp_default_value" in value:
-            # Zeitabhaengige Parameter: die Seite nutzt den Default-Wert.
+            # Time-dependent parameters: the page uses the default value.
             value = value.get("tp_default_value")
         return dict(value) if isinstance(value, dict) else {}
 
 
 def _apply_rules(results: Sequence[_HostResult], lookup: _RuleLookup) -> list[_HostResult]:
-    """Wertet die Items jedes Hosts mit seiner Setup-Regel neu aus."""
+    """Re-evaluates the items of each host with its Setup rule."""
     out: list[_HostResult] = []
     for r in results:
         if not r.items:
-            out.append(r)  # Cache vor b21 ohne Items
+            out.append(r)  # cache from before b21 without items
             continue
         out.append(
             _build_result(
@@ -2259,10 +2252,10 @@ def _apply_rules(results: Sequence[_HostResult], lookup: _RuleLookup) -> list[_H
     return out
 
 
-# Sortierung der Host-Tabelle per Klick auf den Spaltenkopf, wie in den
-# Checkmk-Views (cmk.gui.views.sort_url): URL-Variable "sort", Wert
-# "<spalte>" aufsteigend, "-<spalte>" absteigend. Klickfolge je Spalte:
-# aufsteigend -> absteigend -> aus (Default-Reihenfolge nach Hostname).
+# Sorting of the host table by clicking the column header, as in the
+# Checkmk views (cmk.gui.views.sort_url): URL variable "sort", value
+# "<column>" ascending, "-<column>" descending. Click sequence per column:
+# ascending -> descending -> off (default order by hostname).
 _SORT_COLUMNS = ("host", "coverage")
 
 
@@ -2292,7 +2285,7 @@ def _sorted_results(results: Sequence[_HostResult]) -> list[_HostResult]:
         return ordered
     reverse = current.startswith("-")
     if current.lstrip("-") == "coverage":
-        # Gleiche Coverage: Hostname aufsteigend (stabil sortiert)
+        # Equal coverage: hostname ascending (stable sort)
         return sorted(ordered, key=lambda r: r.coverage_pct, reverse=reverse)
     return sorted(ordered, key=lambda r: r.host_name.lower(), reverse=reverse)
 
@@ -2313,11 +2306,11 @@ def _sortable_th(title: str, column: str, style: str | None = None) -> None:
 
 
 def _page_breadcrumb() -> Breadcrumb:
-    """Setup > Maintenance > Analyze monitoring coverage - wie bei den
-    eingebauten Maintenance-Seiten (z.B. "Analyze configuration", dort via
-    WatoMode.breadcrumb(): Main-Menu + Topic aus dem MainModule + Seite).
-    Import von MainModuleTopicMaintenance bewusst lokal: cmk.gui.wato ist
-    beim Laden der Page-Plugins evtl. noch nicht vollstaendig initialisiert."""
+    """Setup > Maintenance > Analyze monitoring coverage - as with the
+    built-in maintenance pages (e.g. "Analyze configuration", there via
+    WatoMode.breadcrumb(): main menu + topic from the MainModule + page).
+    Import of MainModuleTopicMaintenance deliberately local: cmk.gui.wato may
+    not be fully initialized yet when the page plug-ins are loaded."""
     from cmk.gui.wato import MainModuleTopicMaintenance
 
     breadcrumb = make_topic_breadcrumb(
@@ -2332,14 +2325,13 @@ def _page_breadcrumb() -> Breadcrumb:
 class PageMonitoringCoverageAnalyzer(Page):
     @override
     def page(self, ctx: PageContext) -> PageResult:
-        # Ausbaustufe 2.0.0: die beiden Cron-Trigger-GET-Parameter werden
-        # VOR dem normalen Seitenaufbau behandelt und liefern eine reine
-        # Text-Antwort statt HTML (analog zu Checkmk-eigenen
-        # Automation-/Ajax-Endpunkten) - so bleibt der Endpunkt sowohl per
-        # direktem Python-Aufruf im Site-Kontext (siehe local/bin/
-        # monitoring_coverage_analyzer_cron) als auch per echtem
-        # authentifiziertem HTTP-GET (z.B. curl mit GUI-Session-Cookie,
-        # fuer manuelle Tests) nutzbar.
+        # Expansion stage 2.0.0: the two cron trigger GET parameters are
+        # handled BEFORE the normal page build and return a plain text
+        # response instead of HTML (analogous to Checkmk's own
+        # automation/Ajax endpoints) - this keeps the endpoint usable both
+        # via a direct Python call in the site context (see local/bin/
+        # monitoring_coverage_analyzer_cron) and via a real authenticated
+        # HTTP GET (e.g. curl with a GUI session cookie, for manual tests).
         if ctx.request.has_var("_cron_refresh"):
             written, error = _run_piggyback_refresh()
             html.write_text(
@@ -2354,7 +2346,7 @@ class PageMonitoringCoverageAnalyzer(Page):
             if not due:
                 html.write_text(f"SKIP fullrun not due ({reason})\n")
                 return None
-            # 0.9.0-b25: auch hier im Hintergrund, nicht im Apache-Request
+            # 0.9.0-b25: here too in the background, not in the Apache request
             started, message = _rs.start_background_rerun()
             html.write_text(
                 f"{'OK' if started else 'SKIP'} fullrun {message}\n"
@@ -2363,12 +2355,11 @@ class PageMonitoringCoverageAnalyzer(Page):
 
         make_header(html, PAGE_TITLE, _page_breadcrumb())
 
-        # 0.9.0-b15: sichtbare Rueckmeldung, solange der Re-run laeuft - die
-        # Analyse ist synchron (Seite antwortet erst nach dem Lauf, auf
-        # Test-Site ca. 10-15 s). Beim Absenden: Button deaktivieren (kein
-        # Doppel-Klick), Spinner + Text einblenden. Ein deaktivierter
-        # Submit-Button wird NICHT mitgesendet, daher wird "_analyze" als
-        # hidden input nachgereicht.
+        # 0.9.0-b15: visible feedback while the re-run is in progress - the
+        # analysis is synchronous (page only responds after the run, approx.
+        # 10-15 s on the test site). On submit: disable the button (no
+        # double click), show spinner + text. A disabled submit button is
+        # NOT sent along, therefore "_analyze" is added as a hidden input.
         html.write_html(HTML.without_escaping(_RERUN_SPINNER_CSS))
         html.begin_form("analyze", method="GET", onsubmit=_RERUN_ONSUBMIT_JS)
         html.help(
@@ -2389,10 +2380,10 @@ class PageMonitoringCoverageAnalyzer(Page):
                 "service."
             )
         )
-        # Schritt 2: Button umbenannt von "Start analysis now" zu
-        # "Re-run analysis", weil die Seite jetzt IMMER ein (ggf.
-        # zwischengespeichertes) Ergebnis zeigt - der Button loest also
-        # keinen Erst-Start mehr aus, sondern explizit einen erneuten Lauf.
+        # Step 2: button renamed from "Start analysis now" to
+        # "Re-run analysis", because the page now ALWAYS shows a (possibly
+        # cached) result - so the button no longer triggers an initial
+        # start, but explicitly a new run.
         html.button("_analyze", _("Re-run analysis"), cssclass="hot")
         html.open_span(id_="mca_running", style="display:none")
         html.open_span(class_="mca_spinner")
@@ -2404,13 +2395,13 @@ class PageMonitoringCoverageAnalyzer(Page):
         html.hidden_fields()
         html.end_form()
 
-        # 0.9.0-b25: "Re-run analysis" startet die Analyse als eigenen
-        # Prozess ausserhalb von Apache (Cron-Skript, Modus "rerun") - bei
-        # vielen Hosts oder langsamen Systemen dauert sie laenger als der
-        # Apache-Timeout. Die Seite zeigt den Fortschritt und laedt sich
-        # neu, bis der Lauf fertig ist.
+        # 0.9.0-b25: "Re-run analysis" starts the analysis as a separate
+        # process outside of Apache (cron script, mode "rerun") - with
+        # many hosts or slow systems it takes longer than the Apache
+        # timeout. The page shows the progress and reloads until the run
+        # has finished.
         start_message = None
-        # Noch kein Ergebnis (Erstbesuch) -> wie ein Klick auf Re-run
+        # No result yet (first visit) -> like a click on Re-run
         if ctx.request.has_var("_analyze") or _load_cache_raw() is None:
             started, message = _rs.start_background_rerun()
             if not started and message != "already running":
@@ -2440,12 +2431,12 @@ class PageMonitoringCoverageAnalyzer(Page):
             html.close_span()
             html.write_text(text)
             html.close_div()
-            # Neu laden OHNE _analyze (sonst wuerde ein neuer Lauf gestartet),
-            # Sortierung bleibt erhalten.
+            # Reload WITHOUT _analyze (otherwise a new run would be started),
+            # sorting is preserved.
             url = makeuri_contextless(request, _sort_vars(), filename="monitoring_coverage_analyzer.py")
             html.javascript(f"setTimeout(function(){{window.location.href={json.dumps(url)};}}, 5000);")
         elif state == "failed":
-            # Bei abgebrochenem Prozess gibt es kein Ende -> Startzeit
+            # An aborted process has no end time -> start time
             when_ts = status.get("finished") or status.get("started") or status.get("requested")
             when = (
                 time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(when_ts)))
@@ -2457,10 +2448,10 @@ class PageMonitoringCoverageAnalyzer(Page):
             )
 
     def _show_summary(self, results: Sequence[_HostResult]) -> None:
-        """Gesamt-Coverage ueber alle Hosts: Summe der ueberwachten durch
-        Summe der ueberwachbaren Subsysteme (nach Setup-Regel) - Hosts mit
-        vielen Subsystemen zaehlen also staerker als ein Mittelwert der
-        Host-Prozente."""
+        """Overall coverage across all hosts: sum of monitored divided by
+        sum of monitorable subsystems (per Setup rule) - so hosts with
+        many subsystems weigh more than in an average of the host
+        percentages."""
         if not results:
             return
         monitored = sum(r.monitored_count for r in results)
@@ -2488,8 +2479,8 @@ class PageMonitoringCoverageAnalyzer(Page):
     def _show_results(self) -> None:
         cached = _load_cached_results()
         if cached is None:
-            # Erstbesuch: der Lauf wurde in page() gestartet, der Status
-            # oben zeigt den Fortschritt und laedt die Seite neu.
+            # First visit: the run was started in page(), the status
+            # above shows the progress and reloads the page.
             html.p(_("No analysis result yet - the first analysis run has been started."))
             return
         generated_at, results = cached
@@ -2522,12 +2513,12 @@ class PageMonitoringCoverageAnalyzer(Page):
 
         html.open_table(class_=("data", "table"))
         html.open_tr(class_="header")
-        html.th("")  # Aufklapp-Pfeil-Spalte
-        # 0.9.0-b29: Status-Spalte entfaellt (Farbe der Coverage-Spalte),
-        # Hostname doppelt so breit (frueher ~215 px, brach zu frueh um).
+        html.th("")  # expand arrow column
+        # 0.9.0-b29: status column dropped (color of the coverage column),
+        # hostname twice as wide (previously ~215 px, wrapped too early).
         _sortable_th(_("Hostname"), "host", style="min-width:430px")
         _sortable_th(_("Coverage"), "coverage")
-        # Abstand zum Coverage-Balken (fuellt seine Zelle bis zum Rand).
+        # Spacing to the coverage bar (fills its cell up to the edge).
         html.th(_("Subsystems"), style="padding-left:12px")
         html.th(_("Findings"))
         html.close_tr()
@@ -2535,9 +2526,9 @@ class PageMonitoringCoverageAnalyzer(Page):
             row_id = f"mca_detail_{idx}"
             html.open_tr(class_="even0" if idx % 2 == 0 else "odd0")
             html.open_td()
-            # Reines onclick + style.display-Umschalten, ohne externe
-            # JS-Libraries: der Pfeil dreht sich per CSS-Transform und die
-            # Detailzeile wird per style.display ein-/ausgeblendet.
+            # Plain onclick + style.display toggling, without external
+            # JS libraries: the arrow rotates via CSS transform and the
+            # detail row is shown/hidden via style.display.
             html.write_html(
                 html.render_a(
                     "\u25b6",
@@ -2557,11 +2548,11 @@ class PageMonitoringCoverageAnalyzer(Page):
                 )
             )
             html.close_td()
-            # Schritt 1b: Hostname als klickbarer Link auf "Service of host".
+            # Step 1b: hostname as clickable link to "Service of host".
             html.open_td()
             html.write_html(_host_link(result.host_name))
             html.close_td()
-            # Schritt 1c: Perf-o-Meter-artiger Hintergrundbalken.
+            # Step 1c: Perf-O-Meter-like background bar.
             html.open_td(
                 style=_perfometer_style(result.coverage_pct, result.status),
                 title=result.status,
@@ -2579,16 +2570,16 @@ class PageMonitoringCoverageAnalyzer(Page):
             sections = _detail_sections_for(result, lookup)
             if sections:
                 for heading, lines in sections:
-                    # Kein html.h4() in dieser Checkmk-Version (nur h1-h3);
-                    # fettes div statt h3, das auf der Seite schon als
-                    # Abschnittstitel ("Analysis result") benutzt wird.
+                    # No html.h4() in this Checkmk version (only h1-h3);
+                    # bold div instead of h3, which is already used on the
+                    # page as section title ("Analysis result").
                     html.div(heading, style="font-weight:bold; margin-top:6px")
                     html.open_ul()
                     for line in lines:
                         html.li(line)
                     html.close_ul()
             else:
-                # Aeltere Cache-Datei ohne strukturierte Felder.
+                # Older cache file without structured fields.
                 html.open_ul()
                 for line in result.detail_lines:
                     html.li(line)

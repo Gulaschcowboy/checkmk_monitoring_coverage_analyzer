@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Gemeinsame Auswertung der Coverage-Rohdaten eines Hosts.
+"""Shared evaluation of a host's raw coverage data.
 
-Wird von der GUI-Seite "Analyze monitoring coverage" UND vom Check-Plugin
-"Checkmk Monitoring Coverage" benutzt, damit beide dieselben Regeln
-(Setup-Regel "Monitoring coverage analysis", siehe rulesets/) gleich
-anwenden. Die Analyse selbst rechnet ungefiltert und liefert je Host eine
-Liste von Items; Status, Coverage und Texte entstehen erst hier.
+Used by the GUI page "Analyze monitoring coverage" AND by the check plugin
+"Checkmk Monitoring Coverage", so that both apply the same rules
+(Setup rule "Monitoring coverage analysis", see rulesets/) in the same
+way. The analysis itself computes unfiltered and returns a list of items
+per host; status, coverage and texts are only produced here.
 
-Item (dict, JSON-serialisierbar):
+Item (dict, JSON-serializable):
   kind:     "monitored" | "open" | "candidate"
-  token:    interner Name ("mssql", "generic:xyz")
-  title:    Anzeigename
-  plugins:  verfuegbare / aktive Check-Plugins
-  evidence: Belege (Texte)
-  state:    Kurztext, z.B. "running, not monitored"
-  hint:     Handlungshinweis (optional)
-  sources:  Datenquellen (optional, generische Treffer)
+  token:    internal name ("mssql", "generic:xyz")
+  title:    display name
+  plugins:  available / active check plugins
+  evidence: evidence (texts)
+  state:    short text, e.g. "running, not monitored"
+  hint:     action hint (optional)
+  sources:  data sources (optional, generic matches)
 
-Keine Abhaengigkeit von cmk.gui oder cmk.agent_based - nur stdlib.
+No dependency on cmk.gui or cmk.agent_based - stdlib only.
 """
 from __future__ import annotations
 
@@ -32,10 +32,10 @@ GENERIC_OFF = "off"
 
 
 def generic_mode(params: Mapping[str, Any] | None) -> str:
-    """Modus der generischen (Fuzzy-)Kandidaten aus der Setup-Regel.
+    """Mode for generic (fuzzy) candidates from the Setup rule.
 
-    Default (keine Regel/kein Wert): WARN, d.h. wie andere Findings. Die
-    Regel kann sie abschalten ("off") oder nur als Info zeigen ("info").
+    Default (no rule/no value): WARN, i.e. like other findings. The
+    rule can disable them ("off") or show them as info only ("info").
     """
     mode = (params or {}).get("fuzzy_search", GENERIC_WARN)
     return mode if mode in (GENERIC_OFF, GENERIC_INFO, GENERIC_WARN) else GENERIC_WARN
@@ -57,7 +57,7 @@ class Evaluation(NamedTuple):
     candidate_lines: list[str]
     ignored_lines: list[str]
     monitored_lines: list[str]
-    # Zaehler fuer die Gesamt-Coverage ueber alle Hosts (GUI-Seite)
+    # Counters for the overall coverage across all hosts (GUI page)
     monitored_count: int = 0
     total_count: int = 0
 
@@ -68,8 +68,8 @@ def _compile(pattern: object) -> re.Pattern[str] | None:
     try:
         return re.compile(pattern, re.IGNORECASE)
     except re.error:
-        # Ungueltige Regex: Regel-Feld wirkt nicht (die Setup-GUI prueft
-        # die Syntax bereits beim Speichern).
+        # Invalid regex: the rule field has no effect (the Setup GUI already
+        # checks the syntax when saving).
         return None
 
 
@@ -84,8 +84,8 @@ def parse_ignore_rules(params: Mapping[str, Any] | None) -> list[IgnoreRule]:
             evidence=_compile(entry.get("evidence")),
             comment=str(entry.get("comment") or "").strip(),
         )
-        # Eintrag ohne ein einziges (gueltiges) Muster wuerde alles
-        # treffen - wird ignoriert.
+        # An entry without a single (valid) pattern would match
+        # everything - it is ignored.
         if rule.subsystem or rule.plugin or rule.evidence:
             rules.append(rule)
     return rules
@@ -96,7 +96,7 @@ def _any_match(pattern: re.Pattern[str], values: Iterable[str]) -> bool:
 
 
 def matching_ignore_rule(item: Mapping[str, Any], rules: Sequence[IgnoreRule]) -> IgnoreRule | None:
-    """Erste Regel, deren gesetzte Muster ALLE auf das Item passen."""
+    """First rule whose set patterns ALL match the item."""
     for rule in rules:
         if rule.subsystem and not _any_match(
             rule.subsystem, (item.get("title", ""), item.get("token", ""))
@@ -117,9 +117,9 @@ def _short_plugins(plugins: Sequence[str], limit: int = 5) -> str:
 
 
 def _compact_plugins(plugins: Sequence[str], min_group: int = 3) -> str:
-    """Ab min_group Namen mit gemeinsamem Praefix (bis zum letzten '_')
-    als '<praefix>*' zusammenfassen, z.B. esx_vsphere_vm_cpu, ..._name ->
-    'esx_vsphere_vm_*'. Sonst die volle Liste."""
+    """From min_group names on, collapse names with a common prefix (up to
+    the last '_') into '<prefix>*', e.g. esx_vsphere_vm_cpu, ..._name ->
+    'esx_vsphere_vm_*'. Otherwise the full list."""
     names = list(plugins)
     if len(names) >= min_group:
         prefix = os.path.commonprefix(names)
@@ -130,8 +130,8 @@ def _compact_plugins(plugins: Sequence[str], min_group: int = 3) -> str:
 
 
 def _item_line(item: Mapping[str, Any]) -> str:
-    # sources (optional, generische Treffer): passende Agent-Plug-ins /
-    # Special Agents als Datenquelle der Check-Plug-ins.
+    # sources (optional, generic matches): matching agent plug-ins /
+    # special agents as data source of the check plug-ins.
     sources = item.get("sources") or ""
     return "%s: %s – available plug-in(s): %s%s [detected via %s]" % (
         item.get("title", ""),
@@ -155,8 +155,8 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
         kind = item.get("kind")
         if kind not in ("open", "candidate"):
             continue
-        # Fuzzy-Suche per Regel abgeschaltet: Kandidaten komplett weglassen
-        # (auch nicht unter "Ignored").
+        # Fuzzy search disabled by rule: omit candidates completely
+        # (not even under "Ignored").
         if kind == "candidate" and mode == GENERIC_OFF:
             continue
         rule = matching_ignore_rule(item, rules)
@@ -172,7 +172,7 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
         else:
             candidates.append(item)
 
-    # Generische Kandidaten zaehlen nur im WARN-Modus wie offene Findings.
+    # Generic candidates only count like open findings in WARN mode.
     counting_open = open_items + (candidates if mode == GENERIC_WARN else [])
     total = len(monitored) + len(counting_open)
     monitored_n = len(monitored)
@@ -191,7 +191,7 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
     monitored_lines = [
         "%s: monitored (via %s)" % (i.get("title", ""), _compact_plugins(i.get("plugins") or []))
         if i.get("state", "monitored") == "monitored"
-        # z.B. "plug-in deployed, all services disabled by rule (12)"
+        # e.g. "plug-in deployed, all services disabled by rule (12)"
         else "%s: %s" % (i.get("title", ""), i.get("state", ""))
         for i in by_title(monitored)
     ]
@@ -199,8 +199,8 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
     findings_parts = []
     for item in by_title(counting_open):
         hint = item.get("hint") or ""
-        # Generische Treffer: "<state>. <hint>" (Hint ist dort ein kurzer
-        # Verweis auf die Details, keine Handlungsanweisung).
+        # Generic matches: "<state>. <hint>" (there the hint is a short
+        # reference to the details, not an instruction).
         if hint and item.get("kind") == "candidate":
             findings_parts.append("%s: %s. %s" % (item.get("title", ""), item.get("state", ""), hint))
             continue
@@ -230,7 +230,7 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
 def detail_sections(
     evaluation: Evaluation, source_lines: Sequence[str], mode: str = GENERIC_WARN
 ) -> list[tuple[str, list[str]]]:
-    """Detail-Abschnitte in fester Reihenfolge; leere entfallen."""
+    """Detail sections in fixed order; empty ones are omitted."""
     candidate_heading = (
         "Candidates (generic match):"
         if mode == GENERIC_WARN

@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Laufzustand von monitoring_coverage_analyzer OHNE Checkmk-GUI.
+"""Run state of monitoring_coverage_analyzer WITHOUT the Checkmk GUI.
 
-Alles, was das Cron-Skript fuer die haeufigen, schnellen Wege braucht
-(Piggyback-Refresh alle 5 min, Pruefung "Full-Run faellig?"), sowie der
-Zustand des Analyse-Laufs im Hintergrund. Bewusst ohne cmk.gui-Importe:
-das Hochfahren der GUI (main_modules.register) kostet je nach System
-3-20 s und wird nur noch fuer einen echten Analyse-Lauf gebraucht.
+Everything the cron script needs for the frequent, fast paths
+(piggyback refresh every 5 min, check "full run due?"), plus the state
+of the background analysis run. Deliberately without cmk.gui imports:
+starting up the GUI (main_modules.register) takes 3-20 s depending on the
+system and is only needed for an actual analysis run.
 
-Wird auch von der GUI-Seite benutzt (Cache-Datei, Piggyback-Schreiben,
-Start und Status des Hintergrund-Laufs), damit es nur EINE Implementierung
-gibt.
+Also used by the GUI page (cache file, piggyback writing, start and
+status of the background run), so that there is only ONE implementation.
 """
 from __future__ import annotations
 
@@ -39,13 +38,13 @@ _JOB_STATE_NAME = "monitoring_coverage_analyzer_job.json"
 _JOB_LOG_REL = os.path.join("var", "log", "monitoring_coverage_analyzer.log")
 CRON_SCRIPT_REL = os.path.join("local", "bin", "monitoring_coverage_analyzer_cron")
 
-# Der fullrun-Cron laeuft einmal taeglich. last_full_run_timestamp wird erst
-# am ENDE eines Laufs gesetzt - ohne Toleranz waere der Lauf am Folgetag zur
-# selben Uhrzeit "noch nicht faellig" und es gaebe nur jeden 2. Tag einen
-# Full-Run. Die Toleranz muss groesser als die Laufzeit eines Full-Runs sein.
+# The fullrun cron runs once a day. last_full_run_timestamp is only set at
+# the END of a run - without a grace period, the run on the following day at
+# the same time would be "not yet due" and there would only be a full run
+# every 2nd day. The grace period must be longer than a full run takes.
 FULL_RUN_DUE_GRACE_SECONDS = 3600
 
-# Defaults der globalen Einstellungen (siehe web/plugins/config/...)
+# Defaults of the global settings (see web/plugins/config/...)
 _GLOBAL_DEFAULTS: dict[str, Any] = {
     "generate_piggyback_data": True,
     "piggyback_interval_hours": 24,
@@ -66,16 +65,16 @@ def cache_path() -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Globale Einstellungen ohne GUI lesen
+# Read global settings without the GUI
 # ---------------------------------------------------------------------------
 
 
 def global_setting(name: str) -> Any:
-    """Liest eine globale Einstellung dieses Pakets aus den Konfigurations-
-    dateien der GUI (etc/check_mk/multisite.mk und multisite.d/**/*.mk, in
-    derselben Reihenfolge wie die GUI - spaetere Zuweisungen gewinnen).
-    Ausgewertet werden nur einfache Zuweisungen 'name = <Literal>'; alles
-    andere liefert den Default."""
+    """Reads a global setting of this package from the GUI configuration
+    files (etc/check_mk/multisite.mk and multisite.d/**/*.mk, in the same
+    order as the GUI - later assignments win).
+    Only simple assignments 'name = <literal>' are evaluated; anything
+    else yields the default."""
     root = omd_root()
     value = _GLOBAL_DEFAULTS.get(name)
     if not root:
@@ -121,15 +120,15 @@ def piggyback_interval_hours() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Cache-Datei (Ergebnis des letzten Analyse-Laufs)
+# Cache file (result of the last analysis run)
 # ---------------------------------------------------------------------------
 
 
 @contextlib.contextmanager
 def _file_lock(name: str) -> Iterator[None]:
-    """Kurzer exklusiver Lock (blockierend) - verhindert, dass ein Refresh-
-    Tick zwischen Lesen und Schreiben ein gerade fertiges neues Ergebnis
-    mit dem alten ueberschreibt."""
+    """Short exclusive lock (blocking) - prevents a refresh tick from
+    overwriting a just-finished new result with the old one between
+    reading and writing."""
     path = _var_path(name)
     if not path:
         yield
@@ -171,9 +170,9 @@ def save_results(
     last_run_duration_seconds: float | None = None,
     generated_at: float | None = None,
 ) -> None:
-    """Schreibt das Ergebnis als JSON (atomarer Rename, Apache hat mehrere
-    Worker-Prozesse). Nicht uebergebene Zeitstempel/Laufzeit werden aus dem
-    vorherigen Stand uebernommen. Best-effort: Fehler werden verschluckt."""
+    """Writes the result as JSON (atomic rename, Apache has several worker
+    processes). Timestamps/duration not passed are taken over from the
+    previous state. Best-effort: errors are swallowed."""
     path = cache_path()
     if not path:
         return
@@ -205,9 +204,9 @@ def save_results(
 
 
 def is_full_run_due(*, force: bool) -> tuple[bool, str]:
-    """Neuer Full-Run faellig? 'force' (Re-run-Knopf) oder seit dem letzten
-    Full-Run ist piggyback_interval_hours minus Toleranz vergangen. Ohne
-    Cache immer faellig (Erstlauf)."""
+    """New full run due? 'force' (re-run button) or piggyback_interval_hours
+    minus grace period has passed since the last full run. Without a cache
+    always due (first run)."""
     if force:
         return True, "forced"
     payload = load_cache_raw()
@@ -226,7 +225,7 @@ def is_full_run_due(*, force: bool) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
-# Piggyback-Daten
+# Piggyback data
 # ---------------------------------------------------------------------------
 
 
@@ -236,9 +235,9 @@ def _piggyback_section(
     last_full_run_timestamp: float,
     last_piggyback_refresh_timestamp: float,
 ) -> bytes:
-    """Section "checkmk_monitoring_coverage" (sep(0), eine JSON-Zeile) eines
-    Hosts. Enthaelt beide Zeitstempel, damit das Check-Plugin sie direkt
-    aus der Section lesen kann."""
+    """Section "checkmk_monitoring_coverage" (sep(0), one JSON line) of a
+    host. Contains both timestamps so that the check plugin can read them
+    directly from the section."""
     payload = {
         "host_name": result.get("host_name"),
         "status": result.get("status"),
@@ -247,8 +246,8 @@ def _piggyback_section(
         "findings": result.get("findings"),
         "detail_lines": list(result.get("detail_lines") or []),
         "capability_summary": result.get("capability_summary"),
-        # Ungefilterte Items + Quellen - das Check-Plugin wertet sie mit der
-        # Setup-Regel des Hosts aus (status/findings oben = Stand ohne Regel).
+        # Unfiltered items + sources - the check plugin evaluates them with the
+        # host's Setup rule (status/findings above = state without rule).
         "items": list(result.get("items") or []),
         "source_lines": list(result.get("source_lines") or []),
         "last_full_run_timestamp": last_full_run_timestamp,
@@ -264,10 +263,10 @@ def write_piggyback(
     last_full_run_timestamp: float,
     last_piggyback_refresh_timestamp: float,
 ) -> tuple[int, str | None]:
-    """Schreibt die Piggyback-Daten aller Hosts ueber die offizielle API
-    cmk.piggyback.backend.store_piggyback_raw_data(). Andere Piggyback-
-    Quellen derselben Hosts bleiben unberuehrt (eigener source_hostname).
-    Rueckgabe: (Anzahl geschriebener Hosts, letzter Fehler oder None)."""
+    """Writes the piggyback data of all hosts via the official API
+    cmk.piggyback.backend.store_piggyback_raw_data(). Other piggyback
+    sources of the same hosts remain untouched (own source_hostname).
+    Returns: (number of hosts written, last error or None)."""
     try:
         from cmk.piggyback.backend import store_piggyback_raw_data
     except ImportError:
@@ -299,16 +298,16 @@ def write_piggyback(
                 omd_root=Path(root),
             )
             written += 1
-        except Exception as exc:  # pragma: no cover - defensiv
+        except Exception as exc:  # pragma: no cover - defensive
             last_error = f"{host_name}: {exc!r}"
     return written, last_error
 
 
 def remove_stale_piggyback(results: Sequence[Mapping[str, Any]]) -> list[str]:
-    """Entfernt die Piggyback-Datei dieser Quelle fuer Hosts, die nicht mehr
-    analysiert werden - sonst bliebe dort ein veraltetes Ergebnis liegen.
-    Die Piggyback-API raeumt nur nach Alter auf; betroffen ist ausschliesslich
-    <piggyback>/<host>/monitoring_coverage_analyzer."""
+    """Removes this source's piggyback file for hosts that are no longer
+    analyzed - otherwise an outdated result would remain there.
+    The piggyback API only cleans up by age; only
+    <piggyback>/<host>/monitoring_coverage_analyzer is affected."""
     root = omd_root()
     if not root:
         return []
@@ -331,9 +330,9 @@ def remove_stale_piggyback(results: Sequence[Mapping[str, Any]]) -> list[str]:
 
 
 def run_piggyback_refresh() -> tuple[int, str | None]:
-    """Refresh-Tick: schreibt das zuletzt gespeicherte Ergebnis (keine neue
-    Analyse) mit neuem message_timestamp erneut. Nur last_piggyback_refresh_
-    timestamp aendert sich, last_full_run_timestamp bleibt unveraendert."""
+    """Refresh tick: rewrites the last stored result (no new analysis)
+    with a new message_timestamp. Only last_piggyback_refresh_timestamp
+    changes, last_full_run_timestamp stays unchanged."""
     payload = load_cache_raw()
     if payload is None:
         return 0, "no cached result yet - no full run has completed"
@@ -348,9 +347,8 @@ def run_piggyback_refresh() -> tuple[int, str | None]:
         last_full_run_timestamp=last_full_run_timestamp,
         last_piggyback_refresh_timestamp=now,
     )
-    # Nur den Refresh-Zeitstempel fortschreiben - unter dem Cache-Lock und
-    # nur, wenn in der Zwischenzeit kein neuer Lauf ein anderes Ergebnis
-    # gespeichert hat.
+    # Only update the refresh timestamp - under the cache lock and only if
+    # no new run has stored a different result in the meantime.
     path = cache_path()
     if path:
         try:
@@ -365,15 +363,15 @@ def run_piggyback_refresh() -> tuple[int, str | None]:
 
 
 # ---------------------------------------------------------------------------
-# Analyse-Lauf im Hintergrund
+# Background analysis run
 # ---------------------------------------------------------------------------
 
 
 @contextlib.contextmanager
 def job_lock() -> Iterator[bool]:
-    """Exklusiver, NICHT blockierender Lock fuer einen Analyse-Lauf. Liefert
-    False, wenn bereits ein Lauf aktiv ist. Der Lock endet automatisch mit
-    dem Prozess - auch wenn dieser abgebrochen wird."""
+    """Exclusive, NON-blocking lock for an analysis run. Yields False if a
+    run is already active. The lock ends automatically with the process -
+    even if it is aborted."""
     path = _var_path(_JOB_LOCK_NAME)
     if not path:
         yield True
@@ -429,8 +427,8 @@ def save_job_state(**fields: Any) -> None:
 
 
 def start_background_rerun() -> tuple[bool, str]:
-    """Startet einen Analyse-Lauf als eigenen Prozess ausserhalb von Apache
-    (Cron-Skript, Modus "rerun"). Rueckgabe: (gestartet, Meldung)."""
+    """Starts an analysis run as a separate process outside of Apache
+    (cron script, mode "rerun"). Returns: (started, message)."""
     if job_running():
         return False, "already running"
     root = omd_root()
@@ -441,20 +439,20 @@ def start_background_rerun() -> tuple[bool, str]:
     if not os.path.exists(script):
         return False, f"{CRON_SCRIPT_REL} not found"
     log_path = os.path.join(root, _JOB_LOG_REL)
-    # Status VOR dem Start setzen (der Prozess ueberschreibt ihn mit
-    # "running"), damit die Seite sofort "running" zeigt, auch wenn der
-    # Prozess den Lock noch nicht geholt hat.
+    # Set the status BEFORE starting (the process overwrites it with
+    # "running"), so that the page shows "running" immediately, even if the
+    # process has not acquired the lock yet.
     save_job_state(state="starting", requested=time.time(), error=None)
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, "ab") as log:
-            subprocess.Popen(  # noqa: S603 - fester Pfad, keine Benutzereingabe
+            subprocess.Popen(  # noqa: S603 - fixed path, no user input
                 [python, script, "rerun"],
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 cwd=root,
-                start_new_session=True,  # ueberlebt den Apache-Request
+                start_new_session=True,  # survives the Apache request
                 close_fds=True,
             )
     except OSError as exc:
@@ -463,15 +461,15 @@ def start_background_rerun() -> tuple[bool, str]:
     return True, "started"
 
 
-# Ein "starting"-Status ohne laufenden Prozess gilt nach dieser Zeit als
-# verwaist (Prozess konnte nicht starten).
+# A "starting" status without a running process is considered orphaned
+# after this time (process could not start).
 _STARTING_TIMEOUT_SECONDS = 120
 
 
 def job_status() -> dict[str, Any]:
-    """Status fuer die Seite: state (idle/running/done/failed), started,
-    finished, error. "running" nur, wenn der Lock gehalten wird oder der
-    Start gerade erst angefordert wurde."""
+    """Status for the page: state (idle/running/done/failed), started,
+    finished, error. "running" only if the lock is held or the start has
+    just been requested."""
     state = load_job_state()
     if job_running():
         state["state"] = "running"
@@ -484,8 +482,8 @@ def job_status() -> dict[str, Any]:
             state["state"] = "failed"
             state["error"] = "analysis process did not start (see var/log/monitoring_coverage_analyzer.log)"
     elif state.get("state") == "running":
-        # Status sagt "running", aber kein Prozess haelt den Lock mehr ->
-        # Prozess wurde abgebrochen (z.B. kill, Neustart).
+        # Status says "running", but no process holds the lock anymore ->
+        # process was aborted (e.g. kill, restart).
         state["state"] = "failed"
         state["error"] = state.get("error") or "analysis process ended unexpectedly (see var/log/monitoring_coverage_analyzer.log)"
     state.setdefault("state", "idle")

@@ -1,41 +1,41 @@
 #!/usr/bin/env python3
-"""Globale Setup-Optionen fuer den 'monitoring_coverage_analyzer' Piggyback-Job.
+"""Global Setup options for the 'monitoring_coverage_analyzer' piggyback job.
 
-Ausbaustufe 2.0.0 (Piggyback-Erweiterung, siehe PLAN_piggyback_background_job.md):
+Extension stage 2.0.0 (piggyback extension, see PLAN_piggyback_background_job.md):
 
-Registriert zwei neue Eintraege unter Setup > Global settings, in einer
-eigenen ConfigVariableGroup "Monitoring Coverage Analyzer":
+Registers two new entries under Setup > Global settings, in a
+dedicated ConfigVariableGroup "Monitoring Coverage Analyzer":
 
-  - generate_piggyback_data (Checkbox, Default True): steuert, ob der
-    Full-Run zusaetzlich zum GUI-Ergebnis auch Piggyback-Rohdaten pro Host
-    erzeugt (via cmk.piggyback.backend.store_piggyback_raw_data()).
-  - piggyback_interval_hours (Age/Integer in Stunden, Default 24): nach
-    wie vielen Stunden ein neuer ECHTER Full-Run (Livestatus-Query +
-    Regelauswertung) faellig ist. Der 5-Minuten-Refresh-Tick ist bewusst
-    NICHT konfigurierbar (siehe Plan-Entscheidung 7) und daher hier nicht
-    als eigene Variable vertreten.
+  - generate_piggyback_data (checkbox, default True): controls whether the
+    full run, in addition to the GUI result, also produces piggyback raw
+    data per host (via cmk.piggyback.backend.store_piggyback_raw_data()).
+  - piggyback_interval_hours (Age/Integer in hours, default 24): after
+    how many hours a new REAL full run (Livestatus query +
+    rule evaluation) is due. The 5-minute refresh tick is deliberately
+    NOT configurable (see plan decision 7) and is therefore not
+    represented here as a separate variable.
 
-WICHTIGER BEFUND (live auf der Test-Site / Checkmk 2.5.0p12 Ultimate per grep
-in cmk.gui.utils.plugins.register()/cmk.gui.utils.load_web_plugins()
-verifiziert): diese Checkmk-Version kennt KEINEN Legacy-Plugin-Namespace
-"globals" (nur "config", "dashboard", "icons", "metrics", "pages",
-"perfometer", "sidebar", "views", "visuals", "wato" - siehe
-cmk.gui.utils.plugins.register()). Der im urspruenglichen Plan
-angenommene Ablageort share/check_mk/web/plugins/globals/ existiert bei
-dieser Checkmk-Version schlicht nicht (load_web_plugins() wird fuer
-"globals" nirgends aufgerufen, die Datei wuerde also NIE geladen).
+IMPORTANT FINDING (verified live on the test site / Checkmk 2.5.0p12 Ultimate
+via grep in cmk.gui.utils.plugins.register()/cmk.gui.utils.load_web_plugins()):
+this Checkmk version has NO legacy plugin namespace
+"globals" (only "config", "dashboard", "icons", "metrics", "pages",
+"perfometer", "sidebar", "views", "visuals", "wato" - see
+cmk.gui.utils.plugins.register()). The location
+share/check_mk/web/plugins/globals/ assumed in the original plan simply
+does not exist in this Checkmk version (load_web_plugins() is never called
+for "globals", so the file would NEVER be loaded).
 
-Pragmatische, dem Plan am naechsten kommende Loesung: die
-ConfigVariable-/ConfigVariableGroup-Registrierung erfolgt stattdessen als
-regulaeres "wato"-Legacy-Plugin (cmk.gui.wato.register() ruft
-utils.load_web_plugins("wato", globals()) auf) - das ist exakt der
-Mechanismus, den auch eingebaute Checkmk-Konfigurationsvariablen wie
-graph_timeranges nutzen (siehe cmk.gui.graphing._settings, als "wato"-
-bzw. Modul-Plugin registriert). Der Default-Wert der beiden Variablen
-wird zusaetzlich per plugins/config/monitoring_coverage_analyzer.py
-(siehe dort) gesetzt, weil ConfigVariable selbst keinen Default-Wert
-traegt - der Default-Mechanismus von Checkmk erwartet ihn als
-Modul-Attribut im "config"-Legacy-Plugin-Namespace (siehe
+Pragmatic solution closest to the plan: the
+ConfigVariable/ConfigVariableGroup registration is instead done as a
+regular "wato" legacy plugin (cmk.gui.wato.register() calls
+utils.load_web_plugins("wato", globals())) - this is exactly the
+mechanism also used by built-in Checkmk configuration variables such as
+graph_timeranges (see cmk.gui.graphing._settings, registered as a "wato"
+or module plugin). The default value of the two variables is additionally
+set via plugins/config/monitoring_coverage_analyzer.py
+(see there), because ConfigVariable itself carries no default value -
+Checkmk's default mechanism expects it as a module attribute in the
+"config" legacy plugin namespace (see
 cmk.gui.config._get_default_config_from_legacy_plugins()).
 """
 from __future__ import annotations
@@ -83,10 +83,10 @@ config_variable_registry.register(ConfigVariableGeneratePiggybackData)
 
 
 def _valuespec_piggyback_interval_hours(_context: GlobalSettingsContext) -> Integer:
-    # Bewusst Integer statt Age: ident "piggyback_interval_hours" traegt den
-    # Wert direkt in ganzen Stunden (nicht Sekunden wie es Age liefern
-    # wuerde) - vermeidet eine stille Sekunden/Stunden-Verwechslung im
-    # spaeteren Konsumenten-Code (_query_and_analyze_hosts()-Aufrufer).
+    # Deliberately Integer instead of Age: ident "piggyback_interval_hours"
+    # holds the value directly in whole hours (not seconds as Age would
+    # return) - avoids a silent seconds/hours mix-up in later consumer
+    # code (_query_and_analyze_hosts() callers).
     return Integer(
         title=_("Full analysis run interval (hours)"),
         help=_(

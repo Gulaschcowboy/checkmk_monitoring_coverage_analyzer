@@ -1,41 +1,41 @@
 #!/usr/bin/env python3
 # Checkmk Monitoring Coverage - Agent-based Check-Plugin (Check API v2)
 #
-# Ausbaustufe 2.0.0 der GUI-Seite "monitoring_coverage_analyzer" (siehe
-# PLAN_piggyback_background_job.md): wertet die Piggyback-Section
-# "checkmk_monitoring_coverage" aus, die von der GUI-Seite (siehe
-# local/share/check_mk/web/plugins/pages/monitoring_coverage_analyzer.py,
-# Funktionen _write_piggyback_data()/_run_piggyback_full()/
-# _run_piggyback_refresh()) unter der Piggyback-Quelle
-# "monitoring_coverage_analyzer" pro Host geschrieben wird.
+# Expansion stage 2.0.0 of the GUI page "monitoring_coverage_analyzer" (see
+# PLAN_piggyback_background_job.md): evaluates the piggyback section
+# "checkmk_monitoring_coverage", which is written per host by the GUI page
+# (see local/share/check_mk/web/plugins/pages/monitoring_coverage_analyzer.py,
+# functions _write_piggyback_data()/_run_piggyback_full()/
+# _run_piggyback_refresh()) under the piggyback source
+# "monitoring_coverage_analyzer".
 #
-# Bewusst als eigenstaendiges Plugin (eigener Namespace
-# "monitoring_coverage_analyzer" unter cmk_addons_plugins/, NICHT unter
-# dem Namespace des Referenzprojekts "monitoring_coverage") und mit
-# Check-Plugin/Section "checkmk_monitoring_coverage", Service
+# Deliberately a standalone plugin (own namespace
+# "monitoring_coverage_analyzer" under cmk_addons_plugins/, NOT under
+# the namespace of the reference project "monitoring_coverage") with
+# check plugin/section "checkmk_monitoring_coverage", service
 # "Checkmk Monitoring Coverage".
 #
-# 0.9.0-b11: "2"-Suffix ueberall entfernt (Datei, Section, Check-Plugin,
-# Funktionsnamen; Service-Name bereits in b10). Das Referenzprojekt
-# monitoring_coverage wurde verworfen - keine Kompatibilitaet/Koexistenz
-# mehr noetig. Bestehende Autochecks "checkmk_monitoring_coverage2" werden
-# nach dem Update zu "Unimplemented check" und muessen per Discovery
-# ersetzt werden.
+# 0.9.0-b11: "2" suffix removed everywhere (file, section, check plugin,
+# function names; service name already in b10). The reference project
+# monitoring_coverage was discarded - compatibility/coexistence no longer
+# needed. Existing autochecks "checkmk_monitoring_coverage2" become
+# "Unimplemented check" after the update and must be replaced via
+# discovery.
 #
-# ZWEI GETRENNTE ZEITSTEMPEL im Service-Output sind PFLICHT
-# (Transparenzprinzip, Plan-Entscheidung 11, kein Ausnahmefall):
-#   - "Content last computed: ..." - Zeitpunkt des letzten ECHTEN
-#     Full-Runs (Livestatus-Query + Regelauswertung, neuer Inhalt).
-#   - "Piggyback transfer last refreshed: ..." - Zeitpunkt des letzten
-#     Refresh-Ticks (nur store_piggyback_raw_data erneut mit gleichem
-#     Inhalt + neuem message_timestamp aufgerufen).
-# Beide Zeilen erscheinen IMMER zusammen.
+# TWO SEPARATE TIMESTAMPS in the service output are MANDATORY
+# (transparency principle, plan decision 11, no exceptions):
+#   - "Content last computed: ..." - time of the last REAL
+#     full run (Livestatus query + rule evaluation, new content).
+#   - "Piggyback transfer last refreshed: ..." - time of the last
+#     refresh tick (only store_piggyback_raw_data called again with the same
+#     content + new message_timestamp).
+# Both lines ALWAYS appear together.
 #
-# 0.9.0-b21: Status, Coverage und Texte werden hier aus den ungefilterten
-# Items der Section berechnet (lib/evaluate.py, gemeinsam mit der GUI-
-# Seite) - dadurch wirken Ignore-Regeln und der Modus fuer generische
-# Kandidaten (Setup-Regel "Monitoring coverage analysis") sofort nach
-# "Activate changes", ohne neuen Analyse-Lauf.
+# 0.9.0-b21: status, coverage and texts are computed here from the unfiltered
+# items of the section (lib/evaluate.py, shared with the GUI page) - so
+# ignore rules and the mode for generic candidates (Setup rule
+# "Monitoring coverage analysis") take effect right after
+# "Activate changes", without a new analysis run.
 from __future__ import annotations
 
 import json
@@ -61,10 +61,10 @@ SECTION_NAME = "checkmk_monitoring_coverage"
 
 
 def _parse_monitoring_coverage(string_table: StringTable) -> Mapping[str, Any] | None:
-    """Parst die JSON-Zeile der sep(0)-Section. Robust gegenueber
-    mehreren Zeilen (nur die erste geparste JSON-Zeile wird verwendet -
-    store_piggyback_raw_data() schreibt pro Refresh/Full-Run ohnehin
-    genau eine Zeile, siehe _build_piggyback_payload())."""
+    """Parses the JSON line of the sep(0) section. Robust against
+    multiple lines (only the first parsed JSON line is used -
+    store_piggyback_raw_data() writes exactly one line per refresh/full run
+    anyway, see _build_piggyback_payload())."""
     for row in string_table:
         raw = "".join(row) if isinstance(row, list) else str(row)
         raw = raw.strip()
@@ -113,8 +113,8 @@ def check_monitoring_coverage(params: Mapping[str, Any], section: Mapping[str, A
             _ev.generic_mode(params),
         )
     else:
-        # Section eines aelteren Analyse-Laufs (vor b21): fertiges Ergebnis,
-        # Regeln wirken erst nach dem naechsten Lauf.
+        # Section from an older analysis run (before b21): finished result,
+        # rules only take effect after the next run.
         status = str(section.get("status", "UNKNOWN"))
         coverage_pct = section.get("coverage_pct")
         fraction_text = str(section.get("fraction_text", ""))
@@ -140,8 +140,8 @@ def check_monitoring_coverage(params: Mapping[str, Any], section: Mapping[str, A
             notice="\n".join(str(line) for line in detail_lines),
         )
 
-    # Plan-Entscheidung 11: ZWEI GETRENNTE Zeitstempel-Zeilen, IMMER
-    # zusammen, englischer Wortlaut exakt wie im Plan spezifiziert.
+    # Plan decision 11: TWO SEPARATE timestamp lines, ALWAYS together,
+    # English wording exactly as specified in the plan.
     last_full_run = section.get("last_full_run_timestamp")
     last_refresh = section.get("last_piggyback_refresh_timestamp")
 

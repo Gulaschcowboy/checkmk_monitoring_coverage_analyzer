@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""WATO-Menuintegration: Setup > Maintenance > "Analyze monitoring coverage".
+"""WATO menu integration: Setup > Maintenance > "Analyze monitoring coverage".
 
-Legacy-WATO-Plugin (share/check_mk/web/plugins/wato/), wird von
-cmk.gui.utils.plugins.load_web_plugins("wato", globals()) beim Site-Start
-importiert und registriert per main_module_registry.register(...) einen
-zusaetzlichen Menuepunkt im Setup-Hauptmenue unter dem bestehenden Topic
-"Maintenance" (main_module_topic_registry["maintenance"], siehe Vorbild
+Legacy WATO plugin (share/check_mk/web/plugins/wato/), imported by
+cmk.gui.utils.plugins.load_web_plugins("wato", globals()) at site start;
+it registers via main_module_registry.register(...) an additional menu
+entry in the Setup main menu under the existing topic
+"Maintenance" (main_module_topic_registry["maintenance"], see the model
 "Analyze configuration" in cmk/gui/wato/_main_modules.py).
 
-Der Menuepunkt verweist per Direkt-URL (kein WATO "mode") auf die in
-local/lib/python3/cmk/gui/plugins/pages/monitoring_coverage_analyzer.py
-registrierte Page "monitoring_coverage_analyzer" - siehe
-ABCMainModule.get_url(): enthaelt mode_or_url ein "/" oder endet auf ".py",
-wird der Wert als direkte URL statt als wato.py?mode=... interpretiert.
+The menu entry points via direct URL (no WATO "mode") to the page
+"monitoring_coverage_analyzer" registered in
+local/lib/python3/cmk/gui/plugins/pages/monitoring_coverage_analyzer.py - see
+ABCMainModule.get_url(): if mode_or_url contains a "/" or ends with ".py",
+the value is interpreted as a direct URL instead of wato.py?mode=....
 """
 from __future__ import annotations
 
@@ -48,8 +48,8 @@ class MainModuleMonitoringCoverageAnalyzer(ABCMainModule):
     @property
     @override
     def permission(self) -> None | str:
-        # Kein eigenes Permission-Konzept fuer diesen PoC/Ausbau -
-        # sichtbar fuer alle Setup-Nutzer wie "Analyze configuration".
+        # No dedicated permission concept for this PoC/extension -
+        # visible to all Setup users, like "Analyze configuration".
         return None
 
     @property
