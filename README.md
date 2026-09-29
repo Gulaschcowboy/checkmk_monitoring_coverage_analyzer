@@ -51,7 +51,7 @@ finds the GUI page, the Setup rule and the global settings.
 ## Evidence sources
 
 1. Services already monitored (Livestatus check commands).
-2. Host labels.
+2. Host labels (except the operating system labels `cmk/os_*`).
 3. Agent sections with real data (placeholder content does not count).
 4. Deployed agent plug-ins (`checkmk_agent_plugins_*` sections).
 5. Runtime evidence via `detect` rules: running systemd units, processes

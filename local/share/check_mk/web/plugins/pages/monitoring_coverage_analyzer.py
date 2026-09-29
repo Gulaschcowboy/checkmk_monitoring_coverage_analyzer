@@ -1249,6 +1249,13 @@ _OS_NAME_TOKENS: Mapping[str, frozenset[str]] = {
 }
 
 
+# Host labels that describe the operating system; never evidence for an
+# application (see _analyze_host).
+_OS_LABELS = frozenset({
+    "cmk/os_name", "cmk/os_platform", "cmk/os_type", "cmk/os_family", "cmk/os_version",
+})
+
+
 def _os_name_tokens(labels: Mapping[str, str]) -> frozenset[str]:
     """Name parts that denote the host's OS (from os_type/os_family)."""
     tokens: set[str] = set()
@@ -1523,6 +1530,11 @@ def _analyze_host(
             _add_capability(token, T_CHECK, f"check_command(s)='{', '.join(plugin_names)}'")
 
     for name, value in labels.items():
+        # OS labels describe the operating system, not an application
+        # running on it ("Oracle Linux Server" is not an Oracle database,
+        # "Citrix Hypervisor" is not a Citrix Delivery Controller).
+        if name in _OS_LABELS:
+            continue
         for raw in (name, value):
             token = _canonical_token(str(raw))
             if token in TITLES:

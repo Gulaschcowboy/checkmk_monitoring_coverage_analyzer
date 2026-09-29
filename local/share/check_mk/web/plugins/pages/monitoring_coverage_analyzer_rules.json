@@ -14,6 +14,8 @@
     "nfsd": "nfsexports",
     "catalina": "jolokia", "tomcat": "jolokia", "jolokia": "jolokia",
     "ora": "oracle", "oracle": "oracle", "pmon": "oracle",
+    "oracle_crs": "oracle_crs", "mk_oracle_crs": "oracle_crs", "oracle_crs_res": "oracle_crs",
+    "oracle_crs_version": "oracle_crs", "oracle_crs_voting": "oracle_crs",
     "sqlservr": "mssql", "mssql": "mssql",
     "w3wp": "iis", "inetinfo": "iis", "iis": "iis",
     "msexchange": "msexch", "edgetransport": "msexch", "exchange": "msexch",
@@ -102,6 +104,7 @@
     "siemens_plc": "Siemens S7 PLC",
     "pure_storage_fa": "Pure Storage FlashArray",
     "ibm_mq": "IBM MQ",
+    "oracle_crs": "Oracle Clusterware (CRS)",
     "ibm_svc": "IBM Spectrum Virtualize / SVC",
     "domino": "HCL/IBM Domino",
     "citrix_vda": "Citrix VDA (piggyback)",
@@ -131,7 +134,8 @@
     "postfix": "Built into the Linux agent (postfix_mailq) - run discovery.",
     "nfsexports": "Deploy the 'nfsexports' agent plug-in, then run discovery.",
     "jolokia": "Integrate Jolokia and deploy the 'mk_jolokia' agent plug-in.",
-    "oracle": "Deploy the 'mk_oracle' agent plug-in, then run discovery.",
+    "oracle": "Deploy the 'mk_oracle' agent plug-in (Linux/Unix) or 'mk_oracle.ps1' (Windows), then run discovery.",
+    "oracle_crs": "Deploy the 'mk_oracle_crs' agent plug-in (Linux/Unix), then run discovery.",
     "mssql": "Deploy the 'mk-sql' (mk-sql.exe on Windows) agent plug-in, then run discovery.",
     "iis": "Deploy the 'iis_app_pool_state.ps1' agent plug-in, then run discovery.",
     "msexch": "Deploy the Exchange counter plug-ins, then run discovery.",
@@ -222,7 +226,11 @@
       "runtime": ["systemd:^postfix(@\\S*)?\\.service$"]
     },
     "oracle": {
-      "runtime": ["process:^ora_pmon_"]
+      "runtime": ["process:^(ora|asm|xe|db)_pmon_", "process:(?i)^oracle\\.exe$", "winservice:^Oracle(ASM)?Service.+"]
+    },
+    "oracle_crs": {
+      "runtime": ["process:^(ohasd|crsd|ocssd)\\.bin$"],
+      "not_on_os": ["windows"]
     },
     "powerdns": {
       "runtime": ["systemd:^pdns(-recursor)?\\.service$"]
