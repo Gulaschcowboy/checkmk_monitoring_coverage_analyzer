@@ -2430,6 +2430,9 @@ class PageMonitoringCoverageAnalyzer(Page):
             + HTML.without_escaping("<br>")
             + HTML.with_escaping(_("Run once as the site user:"))
             + HTML.without_escaping(" <tt>mcactl setup</tt>")
+            + HTML.with_escaping(
+                " " + _("(in distributed setups on the central site only).")
+            )
         )
 
     def _show_job_status(self, start_message: str | None) -> None:
