@@ -1473,6 +1473,7 @@ def _analyze_host(
     generic_catalog: Mapping[str, _GenericFamily] | None = None,
     discovery: Mapping[str, _DiscoveryCounts] | None = None,
     check_commands_by_host: Mapping[str, Sequence[str]] | None = None,
+    cluster_commands: Mapping[str, Sequence[str]] | None = None,
 ) -> _HostResult:
     """Coverage correlation for a single host (as of 0.9.0-b14).
 
@@ -1506,6 +1507,16 @@ def _analyze_host(
     (no cache file) thus only have T_CHECK/T_LABEL.
     """
     monitored_map = _monitored_map_for_host(check_commands)
+    # Clustered services live on the cluster host, not on the node: they
+    # count as monitored for the node (cluster_commands: cluster -> commands).
+    on_cluster: dict[str, list[str]] = {}
+    for cluster, commands in sorted((cluster_commands or {}).items()):
+        for token, names in _monitored_map_for_host(commands).items():
+            on_cluster.setdefault(token, []).append(cluster)
+            if token not in monitored_map:
+                monitored_map[token] = names
+            else:
+                monitored_map[token] = sorted({*monitored_map[token], *names})
     inv_packages = _inventory_package_names(host_name)
     if agent_sections is None:
         agent_sections = _agent_sections(host_name)
@@ -1528,14 +1539,20 @@ def _analyze_host(
     for token, plugin_names in monitored_map.items():
         if token in TITLES:
             _add_capability(token, T_CHECK, f"check_command(s)='{', '.join(plugin_names)}'")
+            if token in on_cluster:
+                _add_capability(token, T_CHECK, "clustered on: " + ", ".join(on_cluster[token]))
 
     for name, value in labels.items():
         # OS labels describe the operating system, not an application
         # running on it ("Oracle Linux Server" is not an Oracle database,
         # "Citrix Hypervisor" is not a Citrix Delivery Controller).
-        if name in _OS_LABELS:
+        if name in _OS_LABELS or name == "cmk/site":
             continue
-        for raw in (name, value):
+        # Built-in label names all start with "cmk/", which would map to
+        # the token "checkmk" for every host - only the part after it
+        # counts (cmk/docker_object -> docker, cmk/pve/entity -> pve).
+        # cmk/site is skipped: the site name is freely chosen.
+        for raw in (name.removeprefix("cmk/"), value):
             token = _canonical_token(str(raw))
             if token in TITLES:
                 _add_capability(token, T_LABEL, f"host_label='{name}:{value}'")
@@ -1955,9 +1972,9 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
         with sites.prepend_site():
             site_rows = connection.query(
                 "GET hosts\n"
-                "Columns: name tags labels\n"
+                "Columns: name tags labels custom_variables\n"
             )
-        rows = [row[1:] for row in site_rows]
+        rows = [row[1:4] for row in site_rows]
         host_sites = {row[1]: row[0] for row in site_rows}
         # services_with_info/-fullstate do NOT return check_command; so query
         # all service check commands per host separately (a single
@@ -1975,12 +1992,29 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
         if isinstance(check_command, str) and check_command:
             check_commands_by_host.setdefault(host_name, []).append(check_command)
 
+    # Cluster hosts: Checkmk sets the custom variable NODENAMES only on
+    # clusters. A cluster carries the merged labels of its nodes and looks
+    # like an agent host, but has no agent output of its own - the node
+    # agents deliver the evidence. So clusters are not analyzed; their
+    # (clustered) services count for their nodes instead.
+    clusters_by_node: dict[str, list[str]] = {}
+    cluster_names: set[str] = set()
+    for row in site_rows:
+        custom = row[4] if len(row) > 4 and isinstance(row[4], dict) else {}
+        nodes = str(custom.get("NODENAMES", "")).split()
+        if nodes:
+            cluster_names.add(row[1])
+            for node in nodes:
+                clusters_by_node.setdefault(node, []).append(row[1])
+
     # "cmk -L" EXACTLY ONCE for the entire analysis run, not per host.
     available_map = _available_plugin_map()
     discovery_by_host = _discovery_states(connection)
 
     agent_rows: list[tuple[str, dict[str, str]]] = []
     for host_name, tags, labels in rows:
+        if host_name in cluster_names:
+            continue
         # Note: Checkmk allows custom IDs for the "agent" tag group (e.g.
         # "all-agents" instead of the default value "cmk-agent") - a check
         # for tags["agent"] == "cmk-agent" is therefore NOT site-independent.
@@ -2011,7 +2045,19 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
     # families that run on almost all hosts of the same OS (base OS
     # components, without a maintained list).
     catalog = _generic_catalog()
-    generic_by_host = _generic_by_host(agent_rows, sections_by_host, check_commands_by_host, catalog)
+    cluster_commands_by_node = {
+        node: {c: check_commands_by_host.get(c, []) for c in clusters}
+        for node, clusters in clusters_by_node.items()
+    }
+    generic_by_host = _generic_by_host(
+        agent_rows, sections_by_host,
+        {
+            h: [*check_commands_by_host.get(h, []),
+                *(c for cmds in cluster_commands_by_node.get(h, {}).values() for c in cmds)]
+            for h, _labels in agent_rows
+        },
+        catalog,
+    )
 
     results: list[_HostResult] = []
     for host_name, labels in agent_rows:
@@ -2019,6 +2065,7 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
             host_name=host_name,
             labels=labels,
             check_commands=check_commands_by_host.get(host_name, []),
+            cluster_commands=cluster_commands_by_node.get(host_name),
             available_map=available_map,
             agent_sections=sections_by_host.get(host_name),
             generic_found=generic_by_host.get(host_name),

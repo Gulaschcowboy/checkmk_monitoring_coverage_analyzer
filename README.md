@@ -20,6 +20,8 @@ finds the GUI page, the Setup rule and the global settings.
   in the background (outside the web server, so large sites do not hit the
   Apache timeout); the page reloads until it has finished. The run's log
   is written to `var/log/monitoring_coverage_analyzer.log`.
+  Cluster hosts are not analyzed (they have no agent output of their
+  own); their clustered services count as monitored on the nodes.
 - **Piggyback service** "Checkmk Monitoring Coverage" per host
   (check plug-in `checkmk_monitoring_coverage`), fed from the cached
   analysis result.
@@ -51,7 +53,8 @@ finds the GUI page, the Setup rule and the global settings.
 ## Evidence sources
 
 1. Services already monitored (Livestatus check commands).
-2. Host labels (except the operating system labels `cmk/os_*`).
+2. Host labels (except the operating system labels `cmk/os_*` and
+   `cmk/site`; for built-in labels only the part after `cmk/` counts).
 3. Agent sections with real data (placeholder content does not count).
 4. Deployed agent plug-ins (`checkmk_agent_plugins_*` sections).
 5. Runtime evidence via `detect` rules: running systemd units, processes
