@@ -278,7 +278,7 @@
       "not_on_os": ["windows"]
     },
     "entra_connect": {
-      "runtime": ["winservice:^(ADSync|AzureADConnectAuthenticationAgent|AzureADConnectAgentUpdater)$"],
+      "runtime": ["winservice:^(ADSync|AzureADConnectAuthenticationAgent|AADConnectProvisioningAgent)$"],
       "monitored_elsewhere": ["azure(_v2)?_ad_sync"]
     },
     "citrix_vda": {
