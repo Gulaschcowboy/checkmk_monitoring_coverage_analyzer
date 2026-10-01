@@ -54,6 +54,7 @@
     "dell_om_mem": "dell_om", "dell_om_power": "dell_om", "dell_om_power_unit": "dell_om", "dell_om_processors": "dell_om", "dell_om_sensors": "dell_om", "dell_om_vdisks": "dell_om",
     "smart": "smart", "smart_posix": "smart", "smartd": "smart", "smartmontools": "smart",
     "azure_v2_ad_sync": "entra_connect", "azure_ad_sync": "entra_connect",
+    "sap_hana_backup": "sap_hana", "sap_hana_connect": "sap_hana", "sap_hana_data_volume": "sap_hana", "sap_hana_db_status": "sap_hana", "sap_hana_diskusage": "sap_hana", "sap_hana_ess": "sap_hana", "sap_hana_ess_migration": "sap_hana", "sap_hana_events": "sap_hana", "sap_hana_fileinfo": "sap_hana", "sap_hana_fileinfo_groups": "sap_hana", "sap_hana_instance_status": "sap_hana", "sap_hana_license": "sap_hana", "sap_hana_memrate": "sap_hana", "sap_hana_proc": "sap_hana", "sap_hana_replication_status": "sap_hana", "sap_hana_status": "sap_hana",
     "citrix_state": "citrix_vda", "citrix_state_controller": "citrix_vda",
     "citrix_state_hosting_server": "citrix_vda", "citrix_serverload": "citrix_vda",
     "citrix_sessions": "citrix_vda", "citrix_xenapp": "citrix_vda",
@@ -106,6 +107,7 @@
     "hyperv_vm": "Microsoft Hyper-V VM (piggyback)",
     "citrix": "Citrix Delivery Controller",
     "entra_connect": "Microsoft Entra Connect (AD Connect)",
+    "sap": "SAP NetWeaver ABAP (R/3)", "sap_hana": "SAP HANA", "saprouter": "SAP Router",
     "smart": "S.M.A.R.T. Disk Health",
     "dell_om": "Dell OpenManage Server Administrator",
     "siemens_plc": "Siemens S7 PLC",
@@ -166,6 +168,9 @@
     "domino": "Domino detected. Its checks (domino_*) use SNMP: start the Domino SNMP Agent (LNSNMP) on this server and add SNMP to the host in Checkmk, then run discovery.",
     "dell_om": "Dell OpenManage Server Administrator detected. Its hardware checks (dell_om_*) use SNMP: enable the SNMP service on this server (OMSA registers its MIB) and add SNMP to the host in Checkmk. On Linux, the 'mk_omreport' agent plug-in adds virtual disk monitoring.",
     "smart": "Deploy the 'smart_posix' agent plug-in (needs smartmontools; older: 'smart'), then run discovery.",
+    "sap": "SAP ABAP application server detected. Deploy the 'mk_sap.py' agent plug-in via the bakery rule 'SAP R/3 monitoring plug-in' on a Linux host with RFC access to this system (needs pyrfc and the SAP NW RFC SDK); it delivers the data as piggyback to the application server host, then run discovery there.",
+    "sap_hana": "Deploy the 'mk_sap_hana' agent plug-in via the bakery rule 'SAP HANA', then run discovery.",
+    "saprouter": "Deploy the 'mk_saprouter' agent plug-in via the bakery rule 'SAP router certificate', then run discovery.",
     "entra_connect": "Entra Connect detected. Its sync status is monitored via the 'Azure' special agent (option 'Entra Connect Sync') on the tenant host, not on this server. Configure the special agent for the tenant, then run discovery on that host.",
     "citrix_vda": "Citrix VDA detected, piggyback data from the Delivery Controller missing. Deploy the 'citrix_farm.ps1' agent plug-in on the Delivery Controller (no bakery rule: use 'Deploy custom files with agent' and set $DNSdomain in the script, it is stripped from the machine names; the plug-in must not run as Local System but under a domain account with Citrix administrator rights: use the bakery rule 'Run plug-ins and local checks using non-system account' ('Run as user', pattern citrix_farm.ps1)) and make sure the VDA machine names match the host names in Checkmk, otherwise use the ruleset 'Host name translation for piggybacked hosts'.",
     "esx": "VMware VM detected, piggyback data missing. Configure the 'VMware ESX via vSphere' special agent for vCenter/ESXi and make sure the VM names match the host names in Checkmk, otherwise use the ruleset 'Host name translation for piggybacked hosts'.",
@@ -289,6 +294,18 @@
     },
     "smart": {
       "runtime": ["systemd:^(smartd|smartmontools)\\.service$", "process:^smartd$"],
+      "not_on_os": ["windows"]
+    },
+    "sap": {
+      "_comment": "Only the ABAP dispatcher counts; SAP print, Cloud Connector, Business One, Plant Connectivity, host agent and updater services are no evidence for an R/3 system.",
+      "runtime": ["process:^disp\\+work(\\.exe)?$"]
+    },
+    "sap_hana": {
+      "runtime": ["process:^hdbnameserver$"],
+      "not_on_os": ["windows"]
+    },
+    "saprouter": {
+      "runtime": ["process:^saprouter$"],
       "not_on_os": ["windows"]
     },
     "entra_connect": {
