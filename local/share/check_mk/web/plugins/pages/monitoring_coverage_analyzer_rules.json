@@ -293,7 +293,13 @@
       "runtime": ["systemd:^(dsm_sa_datamgrd|dsm_om_connsvc)\\.service$", "process:^dsm_(sa|om)_"]
     },
     "smart": {
+      "_comment": "Virtual disks have no S.M.A.R.T. data: a running smartd is no evidence inside a VM.",
       "runtime": ["systemd:^(smartd|smartmontools)\\.service$", "process:^smartd$"],
+      "unless": [
+        "section:esx_vsphere_vm:data",
+        "systemd:^(open-vm-tools|vmtoolsd|qemu-guest-agent|hv-kvp-daemon|hv_kvp_daemon|hypervkvpd|xe-daemon|xe-linux-distribution|vboxadd-service|google-guest-agent|walinuxagent)\\.service$",
+        "process:^(vmtoolsd|qemu-ga|hv_kvp_daemon|VBoxService|xe-daemon)$"
+      ],
       "not_on_os": ["windows"]
     },
     "sap": {
