@@ -345,7 +345,10 @@ def _load_rules() -> _Rules:
                 continue
             detect[token] = {
                 kind: [str(item) for item in spec.get(kind) or [] if isinstance(item, str)]
-                for kind in ("direct", "runtime", "not_on_os", "monitored_elsewhere")
+                for kind in (
+                    "direct", "runtime", "unless", "piggyback_tokens",
+                    "not_on_os", "monitored_elsewhere",
+                )
             }
     section_data = {
         str(k): str(v) for k, v in (data.get("section_data") or {}).items()
@@ -965,7 +968,10 @@ def _runtime_facts(sections: Mapping[str, list[str]]) -> _Runtime:
 
 
 def _match_condition(
-    condition: str, sections: Mapping[str, list[str]], runtime: _Runtime
+    condition: str,
+    sections: Mapping[str, list[str]],
+    runtime: _Runtime,
+    labels: Mapping[str, str] | None = None,
 ) -> str | None:
     """Evaluates a detect condition; on a match returns a short evidence
     text, otherwise None. Formats (monitoring_coverage_analyzer_rules.json):
@@ -975,6 +981,7 @@ def _match_condition(
       systemd:<regex>     - running systemd unit ([all], active running)
       process:<regex>     - process name (without path), containers excluded
       winservice:<regex>  - running Windows service (service name)
+      label:<name>:<regex> - host label value (used by "unless")
 
     Regex always via re.search - anchors (^...$) belong in the rule.
     """
@@ -994,6 +1001,12 @@ def _match_condition(
                 for line in _data_lines(lines):
                     if regex.search(line):
                         return f"section '{ref}': '{line.strip()[:60]}'"
+            return None
+        if kind == "label":
+            name, _sep, pattern = rest.partition(":")
+            value = (labels or {}).get(name)
+            if value is not None and re.search(pattern, str(value)):
+                return f"host_label='{name}:{value}'"
             return None
         candidates = {
             "systemd": (runtime.systemd_running, "systemd unit '{}' running"),
@@ -1583,6 +1596,18 @@ def _analyze_host(
                 hit = _match_condition(condition, raw_sections, runtime)
                 if hit:
                     _add_capability(token, cap_type, hit)
+        # detect.<token>.unless: a running service alone is no evidence on
+        # such hosts (e.g. Hyper-V management service on a client OS, Hyper-V
+        # integration services inside an Azure VM). Stronger evidence
+        # (data, deployed plug-in, monitored check) is kept.
+        by_type = capability_evidence.get(token)
+        if by_type and T_RUNTIME in by_type:
+            for condition in spec.get("unless", []):
+                if _match_condition(condition, raw_sections, runtime, labels):
+                    del by_type[T_RUNTIME]
+                    if not by_type:
+                        del capability_evidence[token]
+                    break
 
     # 0.9.0-b17: detect.<token>.not_on_os - plug-in does not run on this
     # operating system (e.g. openvpn_clients is a Bash script, not a
@@ -1664,16 +1689,19 @@ def _analyze_host(
             # 0.9.0-b26: plug-in deployed, but only delivers piggyback data
             # for other hosts (e.g. oxidized). Covered if the plugin is
             # monitored on all target hosts.
+            # detect.<token>.piggyback_tokens: the plug-in delivers the
+            # data under other tokens (Hyper-V host -> Hyper-V VM checks).
+            pb_tokens = {s.token, *DETECT.get(s.token, {}).get("piggyback_tokens", [])}
             targets = sorted({
                 t for name, hosts in agent_sections.piggyback.items()
-                if _canonical_token(name) == s.token for t in hosts
+                if _canonical_token(name) in pb_tokens for t in hosts
             })
             if targets:
                 commands = check_commands_by_host or {}
                 by_lower = {h.lower(): h for h in commands}
                 monitored_on = [
                     t for t in targets
-                    if s.token in _monitored_map_for_host(commands.get(by_lower.get(t.lower(), t), []))
+                    if pb_tokens & set(_monitored_map_for_host(commands.get(by_lower.get(t.lower(), t), [])))
                 ]
                 missing = [t for t in targets if t not in monitored_on]
                 pb_evidence = [*s.evidence, "piggyback data for: " + ", ".join(targets)]

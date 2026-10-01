@@ -57,6 +57,11 @@
     "citrix_state": "citrix_vda", "citrix_state_controller": "citrix_vda",
     "citrix_state_hosting_server": "citrix_vda", "citrix_serverload": "citrix_vda",
     "citrix_sessions": "citrix_vda", "citrix_xenapp": "citrix_vda",
+    "hyperv_host": "hyperv_host", "hyperv_vms": "hyperv_host", "hyperv_vms_guestinfos": "hyperv_host", "hyperv_node": "hyperv_host",
+    "hyperv_vm_general": "hyperv_vm", "hyperv_vm_checkpoints": "hyperv_vm", "hyperv_vm_cpu": "hyperv_vm",
+    "hyperv_vm_ram": "hyperv_vm", "hyperv_vm_vhd": "hyperv_vm", "hyperv_vm_vhd_dynamic": "hyperv_vm",
+    "hyperv_vm_vhd_fixed": "hyperv_vm", "hyperv_vm_nic": "hyperv_vm", "hyperv_vm_integration": "hyperv_vm",
+    "hyperv_vmstatus": "hyperv_vm", "hyperv_checkpoints": "hyperv_vm",
     "checkmk": "checkmk", "cmk": "checkmk", "checkmk_agent": "checkmk",
     "monitoring_coverage": "monitoring_coverage_self",
     "checkmk_monitoring_coverage": "monitoring_coverage_self",
@@ -97,6 +102,8 @@
     "unifi": "Ubiquiti UniFi Controller",
     "veeam": "Veeam Backup & Replication",
     "esx": "VMware vSphere VM (piggyback)",
+    "hyperv_host": "Microsoft Hyper-V host",
+    "hyperv_vm": "Microsoft Hyper-V VM (piggyback)",
     "citrix": "Citrix Delivery Controller",
     "entra_connect": "Microsoft Entra Connect (AD Connect)",
     "smart": "S.M.A.R.T. Disk Health",
@@ -161,6 +168,8 @@
     "entra_connect": "Entra Connect detected. Its sync status is monitored via the 'Azure' special agent (option 'Entra Connect Sync') on the tenant host, not on this server. Configure the special agent for the tenant, then run discovery on that host.",
     "citrix_vda": "Citrix VDA detected, piggyback data from the Delivery Controller missing. Deploy the 'citrix_farm.ps1' agent plug-in on the Delivery Controller (no bakery rule: use 'Deploy custom files with agent' and set $DNSdomain in the script, it is stripped from the machine names; the plug-in must not run as Local System but under a domain account with Citrix administrator rights: use the bakery rule 'Run plug-ins and local checks using non-system account' ('Run as user', pattern citrix_farm.ps1)) and make sure the VDA machine names match the host names in Checkmk, otherwise use the ruleset 'Host name translation for piggybacked hosts'.",
     "esx": "VMware VM detected, piggyback data missing. Configure the 'VMware ESX via vSphere' special agent for vCenter/ESXi and make sure the VM names match the host names in Checkmk, otherwise use the ruleset 'Host name translation for piggybacked hosts'.",
+    "hyperv_host": "Hyper-V host detected. Deploy the Hyper-V agent plug-in 'hyperv_host.ps1' via the bakery rule 'Hyper-V' (component 'Hyper-V host monitoring'); it delivers the VM data as piggyback to the VM hosts. Create the VMs as hosts in Checkmk (or use 'Host name translation for piggybacked hosts' if the VM names differ from the host names).",
+    "hyperv_vm": "Hyper-V VM detected, piggyback data from the Hyper-V host missing. Deploy the agent plug-in 'hyperv_host.ps1' on the Hyper-V host (bakery rule 'Hyper-V', component 'Hyper-V host monitoring') and make sure the VM names match the host names in Checkmk, otherwise use the ruleset 'Host name translation for piggybacked hosts'.",
     "checkmk": "Ensure the Checkmk agent self-monitoring services (checkmk_agent) are discovered.",
     "zfs": "Built into the Linux agent (zfsget, needs the zfs tools) - run discovery.",
     "lvm": "Deploy the 'lvm' agent plug-in (lvm_vgs/lvm_lvs), then run discovery.",
@@ -181,7 +190,7 @@
     "tcpconn", "netif", "if", "interfaces", "hr", "snmp", "intel", "watchdog",
     "iptables", "mtr", "site", "monitoring_coverage_self"
   ],
-  "_comment_detect": "Evidence from agent output. Sections whose name maps to a token (via aliases) count automatically if they contain data. direct: extra conditions for 'data arrives' (discovery missing). runtime: service/process is running (agent plug-in missing). not_on_os: cmk/os_family values where the plug-in does not run. monitored_elsewhere: check plug-in regexes (full match); covered if any other host has such a service (centrally monitored, e.g. via a special agent). Conditions: section:<sec>[/<sub>]:data | section:<sec>[/<sub>]:contains:<regex> | systemd:<regex> | process:<regex> | winservice:<regex> (re.search, anchor as needed).",
+  "_comment_detect": "Evidence from agent output. Sections whose name maps to a token (via aliases) count automatically if they contain data. direct: extra conditions for 'data arrives' (discovery missing). runtime: service/process is running (agent plug-in missing). unless: conditions that void runtime evidence on a host (e.g. client OS, cloud VM); may also use label:<name>:<regex>. piggyback_tokens: tokens of the checks that the plug-in feeds as piggyback on other hosts. not_on_os: cmk/os_family values where the plug-in does not run. monitored_elsewhere: check plug-in regexes (full match); covered if any other host has such a service (centrally monitored, e.g. via a special agent). Conditions: section:<sec>[/<sub>]:data | section:<sec>[/<sub>]:contains:<regex> | systemd:<regex> | process:<regex> | winservice:<regex> (re.search, anchor as needed).",
   "detect": {
     "zfs": {
       "direct": ["section:zpool:data", "section:zpool_status:data"]
@@ -286,6 +295,15 @@
     },
     "esx": {
       "runtime": ["winservice:^VMTools$", "systemd:^(open-vm-tools|vmtoolsd)\\.service$"]
+    },
+    "hyperv_host": {
+      "runtime": ["winservice:^vmms$"],
+      "unless": ["label:cmk/os_name:^Microsoft Windows (7|8|8\\.1|10|11)( |$)"],
+      "piggyback_tokens": ["hyperv_vm"]
+    },
+    "hyperv_vm": {
+      "runtime": ["winservice:^vmicheartbeat$", "systemd:^(hv-kvp-daemon|hv_kvp_daemon|hypervkvpd)\\.service$"],
+      "unless": ["winservice:^WindowsAzureGuestAgent$", "systemd:^walinuxagent\\.service$"]
     }
   },
   "_comment_section_data": "A section has data if it has at least one line that is not empty, not a [subsection] header and not matching no_data_lines. section_data.<section>: additionally one data line must match the regex.",
@@ -296,7 +314,7 @@
     "^\\s*no pools available\\s*$"
   ],
   "_comment_section_ignore": "Sections that never count as evidence.",
-  "section_ignore": [],
+  "section_ignore": ["hyperv_node"],
   "_comment_generic_ignore_families": "Check plug-in families never suggested by the generic match (names too common to be evidence). Families known from 'titles'/'aliases' are handled by the curated rules only.",
   "generic_ignore_families": ["local", "win", "job", "custom", "metric", "azure", "dotnet"],
   "_comment_empty_ok": "Sections where a deployed plug-in with an empty section is a valid state (nothing to monitor), not a broken plug-in.",

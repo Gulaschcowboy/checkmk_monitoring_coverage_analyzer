@@ -89,7 +89,13 @@ check the plug-in.
 
 A subsystem is reported only if the site has a matching check plug-in
 (`cmk -L`). Rules may exclude operating systems where a plug-in cannot
-run (`not_on_os`).
+run (`not_on_os`), or void a running service as evidence on certain hosts
+(`unless`, e.g. the Hyper-V management service on a Windows client).
+
+Virtualization guests are detected by their guest services (VMware Tools,
+Hyper-V integration services) and are covered once the piggyback data of
+the virtualization host arrives. A Hyper-V host counts as covered if its
+agent plug-in delivers piggyback data and the VMs are monitored.
 
 ## Installation
 
