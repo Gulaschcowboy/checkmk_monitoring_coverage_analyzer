@@ -67,7 +67,13 @@ def _valuespec_generate_piggyback_data(_context: GlobalSettingsContext) -> Check
             "piggyback JSON payload per host (source host name "
             "'monitoring_coverage_analyzer'), which the agent-based check "
             "plug-in turns into a 'Checkmk Monitoring Coverage' service "
-            "for that host after the next service discovery."
+            "for that host after the next service discovery. "
+            "If disabled, nothing is written, and the piggyback data of "
+            "this source on this site is removed by the next refresh tick "
+            "(every 5 minutes) or analysis run. Copies already distributed "
+            "to remote sites by the piggyback hub are not removed directly; "
+            "they expire there with the maximum piggyback age and are then "
+            "removed by Checkmk."
         ),
         default_value=True,
     )

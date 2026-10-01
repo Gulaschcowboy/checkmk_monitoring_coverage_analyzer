@@ -374,10 +374,61 @@ def remove_stale_piggyback(results: Sequence[Mapping[str, Any]]) -> list[str]:
     return removed
 
 
+def _piggyback_dirs() -> tuple[str, str] | None:
+    root = omd_root()
+    if not root:
+        return None
+    base = os.path.join(root, "tmp", "check_mk")
+    return os.path.join(base, "piggyback"), os.path.join(base, "piggyback_sources")
+
+
+def piggyback_hosts_with_data() -> list[str]:
+    """Hosts that currently have a piggyback file of this source."""
+    dirs = _piggyback_dirs()
+    if dirs is None:
+        return []
+    try:
+        hosts = os.listdir(dirs[0])
+    except OSError:
+        return []
+    return sorted(
+        h for h in hosts
+        if SAFE_HOST_RE.match(h) and os.path.isfile(os.path.join(dirs[0], h, PIGGYBACK_SOURCE_HOSTNAME))
+    )
+
+
+def remove_all_piggyback() -> int:
+    """Removes ALL piggyback data of this source on this site (generation
+    disabled). Other piggyback sources are not touched. Payload files
+    first, then the source status file. Nothing here depends on the
+    piggyback hub: it does not forward deletions, and copies already
+    distributed to remote sites expire there by the age of their data
+    (maximum piggyback age) and are removed by the Checkmk housekeeping.
+    Returns the number of removed payload files."""
+    dirs = _piggyback_dirs()
+    if dirs is None:
+        return 0
+    removed = 0
+    for host_name in piggyback_hosts_with_data():
+        try:
+            os.remove(os.path.join(dirs[0], host_name, PIGGYBACK_SOURCE_HOSTNAME))
+            removed += 1
+        except OSError:
+            continue
+    with contextlib.suppress(OSError):
+        os.remove(os.path.join(dirs[1], PIGGYBACK_SOURCE_HOSTNAME))
+    return removed
+
+
 def run_piggyback_refresh() -> tuple[int, str | None]:
     """Refresh tick: rewrites the last stored result (no new analysis)
     with a new message_timestamp. Only last_piggyback_refresh_timestamp
-    changes, last_full_run_timestamp stays unchanged."""
+    changes, last_full_run_timestamp stays unchanged. With piggyback
+    generation disabled, nothing is written and existing data of this
+    source is removed."""
+    if not generate_piggyback_data_enabled():
+        remove_all_piggyback()
+        return 0, None
     payload = load_cache_raw()
     if payload is None:
         return 0, "no cached result yet - no full run has completed"

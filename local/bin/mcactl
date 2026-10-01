@@ -164,6 +164,11 @@ def cmd_status(site: str, root: str) -> int:
 
         print("  Last full run:               ", fmt(data.get("last_full_run_timestamp")))
         print("  Last piggyback refresh:      ", fmt(data.get("last_piggyback_refresh_timestamp")))
+    from cmk_addons.plugins.monitoring_coverage_analyzer.lib import runstate
+
+    enabled = runstate.generate_piggyback_data_enabled()
+    print("  Piggyback generation:        ", "enabled" if enabled else "disabled (global setting)")
+    print("  Hosts with MCA piggyback data:", len(runstate.piggyback_hosts_with_data()))
     print()
     return 0
 
@@ -251,6 +256,10 @@ def _analysis_job(runstate, mode: str) -> int:
 def cmd_refresh() -> int:
     from cmk_addons.plugins.monitoring_coverage_analyzer.lib import runstate
 
+    if not runstate.generate_piggyback_data_enabled():
+        removed = runstate.remove_all_piggyback()
+        print(f"refresh: piggyback generation disabled, nothing written (removed={removed})")
+        return 0
     written, error = runstate.run_piggyback_refresh()
     print(f"refresh: written={written} error={error}")
     return 0 if error is None else 1

@@ -118,6 +118,12 @@ sites only need the package itself (e.g. via "Replicate extensions").
 If a remote site cannot be reached, its hosts show an "analysis
 incomplete" finding instead of a result.
 
+With the global setting "Generate per-host piggyback data (MCA)"
+disabled, no piggyback data is written, and data written earlier by this
+package is removed on the central site by the next refresh tick or
+analysis run. Copies already distributed to remote sites expire there
+with the maximum piggyback age and are then removed by Checkmk.
+
 ## Repository layout
 
 ```

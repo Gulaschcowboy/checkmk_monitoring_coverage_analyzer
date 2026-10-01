@@ -139,6 +139,7 @@ from cmk.gui.http import request
 from cmk.gui.i18n import _
 from cmk.gui.main_menu import main_menu_registry
 from cmk.gui.pages import Page, PageContext, PageEndpoint, PageResult, page_registry
+from cmk.gui.type_defs import IconNames, StaticIcon
 from cmk.gui.utils.html import HTML
 from cmk.gui.utils.urls import makeuri_contextless
 
@@ -2207,6 +2208,8 @@ def _run_analysis_and_store() -> tuple[int, int, str | None]:
         written, error, _now = _run_piggyback_full(results)
         return len(results), written, error
     _save_cached_results(results, last_full_run_timestamp=time.time())
+    # Generation disabled: remove data written while it was enabled
+    _rs.remove_all_piggyback()
     return len(results), 0, None
 
 
@@ -2442,6 +2445,7 @@ class PageMonitoringCoverageAnalyzer(Page):
 
         make_header(html, PAGE_TITLE, _page_breadcrumb())
         self._show_cron_warning()
+        self._show_piggyback_disabled_info()
 
         # 0.9.0-b15: visible feedback while the re-run is in progress - the
         # analysis is synchronous (page only responds after the run, approx.
@@ -2521,6 +2525,37 @@ class PageMonitoringCoverageAnalyzer(Page):
                 " " + _("(in distributed setups on the central site only).")
             )
         )
+
+    def _show_piggyback_disabled_info(self) -> None:
+        """Blue info box if piggyback generation is disabled in the global
+        settings, with a link to the MCA group of the global settings."""
+        if _rs.generate_piggyback_data_enabled():
+            return
+        url = makeuri_contextless(
+            request,
+            [("mode", "globalvars"), ("search", "Monitoring Coverage Analyzer (MCA)")],
+            filename="wato.py",
+        )
+        # Same look as Checkmk's blue inline help box (div.help with info
+        # icon), but always visible: div.help is hidden unless the help
+        # toggle is on, hence display:flex inline.
+        text = (
+            HTML.with_escaping(
+                _(
+                    "Piggyback data generation is disabled: the analysis results are "
+                    "only shown on this page, no per-host 'Checkmk Monitoring Coverage' "
+                    "services will be created."
+                )
+            )
+            + HTML.without_escaping("<br>")
+            + HTML.with_escaping(_("You can change that in the") + " ")
+            + html.render_a(_("MCA global settings"), href=url)
+            + HTML.with_escaping(".")
+        )
+        html.open_div(class_="help", style="display:flex")
+        html.div(html.render_static_icon(StaticIcon(IconNames.info)), class_="info_icon")
+        html.div(text, class_="help_text")
+        html.close_div()
 
     def _show_job_status(self, start_message: str | None) -> None:
         status = _rs.job_status()
