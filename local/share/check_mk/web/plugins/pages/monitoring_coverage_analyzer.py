@@ -2643,10 +2643,15 @@ class PageMonitoringCoverageAnalyzer(Page):
             % (age_txt, _format_duration(_cached_run_duration()))
         )
         html.p(_("Rule file last modified: %s") % _rules_source_status())
-        rules_txt = _("MCA setup user rules applied: %d rule(s)") % lookup.rule_count
+        rules_url = makeuri_contextless(
+            request,
+            [("mode", "edit_ruleset"), ("varname", "checkgroup_parameters:checkmk_monitoring_coverage")],
+            filename="wato.py",
+        )
+        rules_txt = HTML.with_escaping(": " + _("%d rule(s)") % lookup.rule_count)
         if lookup.error:
-            rules_txt += " - " + _("error: %s") % lookup.error
-        html.p(rules_txt)
+            rules_txt += HTML.with_escaping(" - " + _("error: %s") % lookup.error)
+        html.p(html.render_a(_("MCA setup user rules applied"), href=rules_url) + rules_txt)
 
         if not results:
             html.show_message(
