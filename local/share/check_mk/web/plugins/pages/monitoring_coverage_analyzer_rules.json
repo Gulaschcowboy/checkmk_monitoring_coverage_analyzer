@@ -87,7 +87,7 @@
     "mysql": "MySQL / MariaDB", "postgres": "PostgreSQL",
     "apache": "Apache HTTP Server", "nginx": "NGINX", "redis": "Redis",
     "mongodb": "MongoDB", "docker": "Docker", "rabbitmq": "RabbitMQ",
-    "elasticsearch": "Elasticsearch", "haproxy": "HAProxy", "postfix": "Postfix",
+    "elasticsearch": "Elasticsearch", "graylog": "Graylog", "haproxy": "HAProxy", "postfix": "Postfix",
     "nfsexports": "NFS Server", "jolokia": "Java / Tomcat (Jolokia)",
     "oracle": "Oracle Database", "mssql": "Microsoft SQL Server",
     "iis": "Microsoft IIS", "msexch": "Microsoft Exchange",
@@ -137,6 +137,7 @@
     "docker": "Deploy the 'mk_docker' agent plug-in, then run discovery.",
     "rabbitmq": "Configure the 'RabbitMQ' special agent, then run discovery.",
     "elasticsearch": "Configure the 'Elasticsearch' special agent.",
+    "graylog": "Graylog server detected. Configure the 'Graylog' special agent for it, then run discovery.",
     "haproxy": "Built into the Linux agent (needs socat and a readable stats socket) - run discovery.",
     "postfix": "Built into the Linux agent (postfix_mailq) - run discovery.",
     "nfsexports": "Deploy the 'nfsexports' agent plug-in, then run discovery.",
@@ -227,6 +228,10 @@
     },
     "elasticsearch": {
       "runtime": ["systemd:^elasticsearch\\.service$"]
+    },
+    "graylog": {
+      "_comment": "Only the Graylog server counts; Sidecar and its collector services are log shippers.",
+      "runtime": ["systemd:^graylog-server\\.service$"]
     },
     "haproxy": {
       "runtime": ["systemd:^haproxy\\.service$"]
