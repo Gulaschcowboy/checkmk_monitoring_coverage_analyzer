@@ -106,6 +106,14 @@ mcactl setup
 omd restart apache
 ```
 
+## Permissions
+
+The page "Analyze monitoring coverage" (Setup > Maintenance) needs the
+Setup permission "Monitoring coverage analysis (MCA)" (default: admin
+role only) in addition to "Use Setup". Users with "Read access to all
+modules" can view the page, but cannot start a new analysis run. Grant
+the permission to other roles under Setup > Users > Roles & permissions.
+
 ## Distributed monitoring
 
 Install and run the setup on the central site only. The central site

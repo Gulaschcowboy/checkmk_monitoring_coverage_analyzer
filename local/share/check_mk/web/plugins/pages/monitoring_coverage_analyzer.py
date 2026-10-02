@@ -137,6 +137,7 @@ from cmk.gui.htmllib.header import make_header
 from cmk.gui.htmllib.html import html
 from cmk.gui.http import request
 from cmk.gui.i18n import _
+from cmk.gui.logged_in import user
 from cmk.gui.main_menu import main_menu_registry
 from cmk.gui.pages import Page, PageContext, PageEndpoint, PageResult, page_registry
 from cmk.gui.type_defs import IconNames, StaticIcon
@@ -2412,9 +2413,27 @@ def _page_breadcrumb() -> Breadcrumb:
     return breadcrumb
 
 
+PERMISSION = "wato.monitoring_coverage_analyzer"
+
+
+def _may_rerun() -> bool:
+    """Starting a run needs the MCA permission itself ("wato.seeall"
+    only grants read access)."""
+    return user.may("wato.use") and user.may(PERMISSION)
+
+
+def _need_view_permission() -> None:
+    """Same rule as Setup modes: "wato.use" plus the MCA permission, or
+    "wato.seeall" for read access. Raises MKAuthException otherwise."""
+    user.need_permission("wato.use")
+    if not user.may("wato.seeall"):
+        user.need_permission(PERMISSION)
+
+
 class PageMonitoringCoverageAnalyzer(Page):
     @override
     def page(self, ctx: PageContext) -> PageResult:
+        _need_view_permission()
         # Expansion stage 2.0.0: the two cron trigger GET parameters are
         # handled BEFORE the normal page build and return a plain text
         # response instead of HTML (analogous to Checkmk's own
@@ -2422,6 +2441,10 @@ class PageMonitoringCoverageAnalyzer(Page):
         # via a direct Python call in the site context (see local/bin/
         # mcactl) and via a real authenticated
         # HTTP GET (e.g. curl with a GUI session cookie, for manual tests).
+        if ctx.request.has_var("_cron_refresh") or ctx.request.has_var("_cron_fullrun"):
+            # Cron triggers via HTTP (manual tests only, mcactl calls the code
+            # directly): same right as the re-run button.
+            user.need_permission(PERMISSION)
         if ctx.request.has_var("_cron_refresh"):
             written, error = _run_piggyback_refresh()
             html.write_text(
@@ -2476,14 +2499,16 @@ class PageMonitoringCoverageAnalyzer(Page):
         # "Re-run analysis", because the page now ALWAYS shows a (possibly
         # cached) result - so the button no longer triggers an initial
         # start, but explicitly a new run.
-        html.button("_analyze", _("Re-run analysis"), cssclass="hot")
-        html.open_span(id_="mca_running", style="display:none")
-        html.open_span(class_="mca_spinner")
-        html.close_span()
-        html.write_text(
-            _("Starting analysis ...")
-        )
-        html.close_span()
+        may_rerun = _may_rerun()
+        if may_rerun:
+            html.button("_analyze", _("Re-run analysis"), cssclass="hot")
+            html.open_span(id_="mca_running", style="display:none")
+            html.open_span(class_="mca_spinner")
+            html.close_span()
+            html.write_text(
+                _("Starting analysis ...")
+            )
+            html.close_span()
         html.hidden_fields()
         html.end_form()
 
@@ -2494,7 +2519,7 @@ class PageMonitoringCoverageAnalyzer(Page):
         # has finished.
         start_message = None
         # No result yet (first visit) -> like a click on Re-run
-        if ctx.request.has_var("_analyze") or _load_cache_raw() is None:
+        if (ctx.request.has_var("_analyze") or _load_cache_raw() is None) and may_rerun:
             started, message = _rs.start_background_rerun()
             if not started and message != "already running":
                 start_message = _("Could not start the analysis: %s") % message

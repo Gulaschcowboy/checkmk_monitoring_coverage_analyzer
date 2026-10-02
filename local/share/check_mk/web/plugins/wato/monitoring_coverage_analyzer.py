@@ -19,10 +19,28 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import override
 
-from cmk.gui.i18n import _
+from cmk.gui.i18n import _, _l
+from cmk.gui.permissions import Permission, permission_registry
 from cmk.gui.type_defs import DynamicIcon, IconNames, StaticIcon
-from cmk.gui.wato import MainModuleTopicMaintenance
+from cmk.gui.wato import PERMISSION_SECTION_WATO, MainModuleTopicMaintenance
 from cmk.gui.watolib.main_menu import ABCMainModule, MainModuleTopic, main_module_registry
+
+
+# Access to the MCA page and its re-run (Setup > Roles & permissions >
+# Setup). Default: admin only. The page additionally needs "wato.use".
+permission_registry.register(
+    Permission(
+        section=PERMISSION_SECTION_WATO,
+        name="monitoring_coverage_analyzer",
+        title=_l("Monitoring coverage analysis (MCA)"),
+        description=_l(
+            "Access the page 'Analyze monitoring coverage' and start a new "
+            "analysis run. The page lists all hosts of all sites with their "
+            "running services and processes."
+        ),
+        defaults=["admin"],
+    )
+)
 
 
 class MainModuleMonitoringCoverageAnalyzer(ABCMainModule):
@@ -49,9 +67,8 @@ class MainModuleMonitoringCoverageAnalyzer(ABCMainModule):
     @property
     @override
     def permission(self) -> None | str:
-        # No dedicated permission concept for this PoC/extension -
-        # visible to all Setup users, like "Analyze configuration".
-        return None
+        # Shown with "wato.monitoring_coverage_analyzer" or "wato.seeall".
+        return "monitoring_coverage_analyzer"
 
     @property
     @override
