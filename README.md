@@ -142,6 +142,19 @@ local/share/check_mk/web/plugins/pages/      GUI page + rules file
 local/share/check_mk/web/plugins/wato/       menu entry, global settings
 local/share/check_mk/web/plugins/config/     config defaults
 local/share/doc/monitoring_coverage_analyzer cron template
+tests/                                       unit tests (not packaged)
+```
+
+## Tests
+
+The tests cover the rules file, the detection of every curated rule on
+synthetic hosts and the evaluation with the Setup rule. A new rule in the
+rules file needs a test case in `tests/test_rule_coverage.py`, otherwise
+the tests fail. They need neither
+a Checkmk installation nor additional packages:
+
+```
+python3 -m unittest discover -s tests
 ```
 
 ## Status
