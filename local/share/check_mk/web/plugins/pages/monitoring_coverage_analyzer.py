@@ -112,6 +112,7 @@ Expansion stage 2.0.0 (piggyback extension):
 from __future__ import annotations
 
 import ast
+import importlib.util
 import inspect
 import json
 import os
@@ -2669,6 +2670,20 @@ def _show_pager(
     html.close_div()
 
 
+def _mca_global_settings_url() -> str:
+    """Global settings filtered to the MCA settings.
+    Checkmk 3.0 has a separate page (global_settings.py) whose search only
+    matches setting names and titles; the old wato.py mode redirects there
+    without the search term. 2.5 searches the group title as well."""
+    if importlib.util.find_spec("cmk.gui.global_settings") is not None:
+        return makeuri_contextless(request, [("search", "(MCA)")], filename="global_settings.py")
+    return makeuri_contextless(
+        request,
+        [("mode", "globalvars"), ("search", "Monitoring Coverage Analyzer (MCA)")],
+        filename="wato.py",
+    )
+
+
 def make_header(writer: Any, title: str, breadcrumb: Breadcrumb) -> None:
     """Page header for Checkmk 2.5 (positional title/breadcrumb) and 3.0
     (keyword-only, plus the GUI settings the caller has to pass in)."""
@@ -2853,11 +2868,7 @@ class PageMonitoringCoverageAnalyzer(Page):
         settings, with a link to the MCA group of the global settings."""
         if _rs.generate_piggyback_data_enabled():
             return
-        url = makeuri_contextless(
-            request,
-            [("mode", "globalvars"), ("search", "Monitoring Coverage Analyzer (MCA)")],
-            filename="wato.py",
-        )
+        url = _mca_global_settings_url()
         # Same look as Checkmk's blue inline help box (div.help with info
         # icon), but always visible: div.help is hidden unless the help
         # toggle is on, hence display:flex inline.
