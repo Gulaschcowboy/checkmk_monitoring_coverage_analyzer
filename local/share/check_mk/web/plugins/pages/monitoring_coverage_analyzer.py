@@ -2436,7 +2436,51 @@ def _current_sort() -> str | None:
 
 def _sort_vars() -> list[tuple[str, str]]:
     current = _current_sort()
-    return [("sort", current)] if current else []
+    return [("sort", current)] + _page_vars() if current else _page_vars()
+
+
+# Pagination of the host table: URL variables "limit" (hosts per page,
+# 0 = all) and "page" (1-based). Sorting starts again on page 1.
+_PAGE_SIZES = (100, 250, 500, 0)
+_DEFAULT_PAGE_SIZE = 100
+
+
+def _current_page_size() -> int:
+    try:
+        value = int(request.get_ascii_input("limit") or _DEFAULT_PAGE_SIZE)
+    except ValueError:
+        return _DEFAULT_PAGE_SIZE
+    return value if value in _PAGE_SIZES else _DEFAULT_PAGE_SIZE
+
+
+def _current_page() -> int:
+    try:
+        return max(1, int(request.get_ascii_input("page") or 1))
+    except ValueError:
+        return 1
+
+
+def _page_vars(page: int | None = None, size: int | None = None) -> list[tuple[str, str]]:
+    """URL variables of the current (or the given) page; defaults omitted."""
+    page = _current_page() if page is None else page
+    size = _current_page_size() if size is None else size
+    out: list[tuple[str, str]] = []
+    if size != _DEFAULT_PAGE_SIZE:
+        out.append(("limit", str(size)))
+    if page > 1:
+        out.append(("page", str(page)))
+    return out
+
+
+def _page_bounds(total: int, page: int, size: int) -> tuple[int, int, int, int]:
+    """(start, end, page, pages) for `total` rows; a page beyond the end is
+    clamped to the last page, size 0 shows everything on one page."""
+    if size <= 0 or total <= size:
+        return 0, total, 1, 1
+    pages = (total + size - 1) // size
+    page = min(max(page, 1), pages)
+    start = (page - 1) * size
+    return start, min(start + size, total), page, pages
 
 
 def _next_sort(column: str) -> str | None:
@@ -2463,7 +2507,9 @@ def _sorted_results(results: Sequence[_HostResult]) -> list[_HostResult]:
 def _sortable_th(title: str, column: str, style: str | None = None) -> None:
     nxt = _next_sort(column)
     url = makeuri_contextless(
-        request, [("sort", nxt)] if nxt else [], filename="monitoring_coverage_analyzer.py"
+        request,
+        ([("sort", nxt)] if nxt else []) + _page_vars(page=1),
+        filename="monitoring_coverage_analyzer.py",
     )
     html.open_th(
         class_=["sort"],
@@ -2473,6 +2519,47 @@ def _sortable_th(title: str, column: str, style: str | None = None) -> None:
     )
     html.write_text(title)
     html.close_th()
+
+
+def _show_pager(total: int, page: int, pages: int, start: int, end: int) -> None:
+    """'Hosts 101-200 of 503' with page links and the page size choice."""
+    sort = _current_sort()
+    sort_vars = [("sort", sort)] if sort else []
+    size = _current_page_size()
+
+    def link(text: str, target_page: int, target_size: int) -> HTML:
+        url = makeuri_contextless(
+            request, sort_vars + _page_vars(page=target_page, size=target_size),
+            filename="monitoring_coverage_analyzer.py",
+        )
+        return html.render_a(text, href=url)
+
+    html.open_div(style="margin:6px 0")
+    html.write_text(_("Hosts %d-%d of %d") % (start + 1, end, total) if total else _("No hosts"))
+    if pages > 1:
+        html.write_text(" | ")
+        if page > 1:
+            html.write_html(link("\u00ab " + _("First"), 1, size))
+            html.write_text(" ")
+            html.write_html(link("\u2039 " + _("Previous"), page - 1, size))
+            html.write_text(" ")
+        html.write_text(_("Page %d of %d") % (page, pages))
+        if page < pages:
+            html.write_text(" ")
+            html.write_html(link(_("Next") + " \u203a", page + 1, size))
+            html.write_text(" ")
+            html.write_html(link(_("Last") + " \u00bb", pages, size))
+    if total > _PAGE_SIZES[0]:
+        html.write_text(" | " + _("Hosts per page:") + " ")
+        for n, option in enumerate(_PAGE_SIZES):
+            if n:
+                html.write_text(" ")
+            label = str(option) if option else _("all")
+            if option == size:
+                html.b(label)
+            else:
+                html.write_html(link(label, 1, option))
+    html.close_div()
 
 
 def _page_breadcrumb() -> Breadcrumb:
@@ -2767,6 +2854,9 @@ class PageMonitoringCoverageAnalyzer(Page):
             )
             return
 
+        total = len(results)
+        start, end, page, pages = _page_bounds(total, _current_page(), _current_page_size())
+        _show_pager(total, page, pages, start, end)
         html.open_table(class_=("data", "table"))
         html.open_tr(class_="header")
         html.th("")  # expand arrow column
@@ -2778,7 +2868,7 @@ class PageMonitoringCoverageAnalyzer(Page):
         html.th(_("Subsystems"), style="padding-left:12px")
         html.th(_("Findings"))
         html.close_tr()
-        for idx, result in enumerate(results):
+        for idx, result in enumerate(results[start:end]):
             row_id = f"mca_detail_{idx}"
             html.open_tr(class_="even0" if idx % 2 == 0 else "odd0")
             html.open_td()
@@ -2843,7 +2933,8 @@ class PageMonitoringCoverageAnalyzer(Page):
             html.close_td()
             html.close_tr()
         html.close_table()
-        html.p(_("Number of hosts checked: %d") % len(results))
+        _show_pager(total, page, pages, start, end)
+        html.p(_("Number of hosts checked: %d") % total)
 
 
 page_registry.register(PageEndpoint("monitoring_coverage_analyzer", PageMonitoringCoverageAnalyzer()))
