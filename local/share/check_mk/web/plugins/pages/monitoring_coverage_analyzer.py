@@ -112,6 +112,7 @@ Expansion stage 2.0.0 (piggyback extension):
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 import os
 import re
@@ -127,16 +128,24 @@ from cmk.gui.breadcrumb import (
     make_current_page_breadcrumb_item,
     make_topic_breadcrumb,
 )
-from cmk.gui.htmllib.header import make_header
 from cmk.gui.htmllib.html import html
 from cmk.gui.http import request
 from cmk.gui.i18n import _
 from cmk.gui.logged_in import user
 from cmk.gui.main_menu import main_menu_registry
 from cmk.gui.pages import Page, PageContext, PageEndpoint, PageResult, page_registry
-from cmk.gui.type_defs import IconNames, StaticIcon
-from cmk.gui.utils.html import HTML
-from cmk.gui.utils.urls import makeuri_contextless
+
+# Checkmk 2.5 / 3.0: these moved in 3.0 (cmk.gui.header, cmk.web.utils.*).
+try:
+    from cmk.gui.header import make_header as _make_header
+    from cmk.web.utils.html import HTML
+    from cmk.web.utils.icons import IconNames, StaticIcon
+    from cmk.web.utils.urls import makeuri_contextless
+except ImportError:
+    from cmk.gui.htmllib.header import make_header as _make_header  # type: ignore[no-redef]
+    from cmk.gui.type_defs import IconNames, StaticIcon  # type: ignore[no-redef]
+    from cmk.gui.utils.html import HTML  # type: ignore[no-redef]
+    from cmk.gui.utils.urls import makeuri_contextless  # type: ignore[no-redef]
 
 # 0.9.0-b21: shared evaluation (ignore rules, status, coverage, texts)
 # with the check plugin - both apply the setup rule the same way.
@@ -2366,16 +2375,26 @@ def _is_full_run_due(*, force: bool) -> tuple[bool, str]:
 _RULESET_NAME = "checkgroup_parameters:checkmk_monitoring_coverage"
 
 
+def _load_mca_ruleset() -> Any:
+    """The Setup ruleset of the MCA service, loaded from all folders.
+    Checkmk 3.0 expects the folder tree as first argument, 2.5 does not."""
+    from cmk.gui.watolib.rulesets import SingleRulesetRecursively
+
+    load = SingleRulesetRecursively.load_single_ruleset_recursively
+    if "tree" in inspect.signature(load).parameters:
+        from cmk.gui.watolib.hosts_and_folders import folder_tree
+
+        return load(folder_tree(), _RULESET_NAME).get(_RULESET_NAME)
+    return load(_RULESET_NAME).get(_RULESET_NAME)
+
+
 class _RuleLookup:
     def __init__(self) -> None:
         self.error: str | None = None
         self._ruleset: Any = None
         self._memo: dict[str, dict[str, Any]] = {}
         try:
-            from cmk.gui.watolib.rulesets import SingleRulesetRecursively
-
-            rulesets = SingleRulesetRecursively.load_single_ruleset_recursively(_RULESET_NAME)
-            ruleset = rulesets.get(_RULESET_NAME)
+            ruleset = _load_mca_ruleset()
             if ruleset is not None and not ruleset.is_empty():
                 self._ruleset = ruleset
         except Exception as exc:  # pragma: no cover - defensive, GUI context
@@ -2514,7 +2533,7 @@ def _show_search_form() -> None:
         '<form method="GET" action="monitoring_coverage_analyzer.py" style="margin:6px 0">'
     ))
     html.text_input(
-        "search", _current_search(), size=40, id_="mca_search",
+        varname="search", default_value=_current_search(), size=40, id_="mca_search",
         placeholder=_("Filter hostname and findings"),
         title=_(
             "Case-insensitive. All words must match the hostname or the findings; "
@@ -2648,6 +2667,30 @@ def _show_pager(
             else:
                 html.write_html(link(label, 1, option))
     html.close_div()
+
+
+def make_header(writer: Any, title: str, breadcrumb: Breadcrumb) -> None:
+    """Page header for Checkmk 2.5 (positional title/breadcrumb) and 3.0
+    (keyword-only, plus the GUI settings the caller has to pass in)."""
+    params = inspect.signature(_make_header).parameters
+    if "debug" not in params:
+        _make_header(writer, title, breadcrumb)
+        return
+    from cmk.gui.config import active_config
+
+    candidates: dict[str, Any] = {
+        "debug": lambda: active_config.debug,
+        "lang": lambda: user.language,
+        "inject_js_profiling_code": lambda: active_config.inject_js_profiling_code,
+        "load_frontend_vue": lambda: active_config.load_frontend_vue,
+        "custom_style_sheet": lambda: active_config.custom_style_sheet,
+        "screenshotmode": lambda: active_config.screenshotmode,
+        "inline_help_as_text": lambda: user.inline_help_as_text,
+        "hide_suggestions": lambda: not user.get_tree_state("suggestions", "all", True),
+        "user_role_ids": lambda: user.role_ids,
+    }
+    kwargs = {name: get() for name, get in candidates.items() if name in params}
+    _make_header(writer, title=title, breadcrumb=breadcrumb, **kwargs)
 
 
 def _page_breadcrumb() -> Breadcrumb:

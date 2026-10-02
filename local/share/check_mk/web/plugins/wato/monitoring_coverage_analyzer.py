@@ -21,7 +21,11 @@ from typing import override
 
 from cmk.gui.i18n import _, _l
 from cmk.gui.permissions import Permission, permission_registry
-from cmk.gui.type_defs import DynamicIcon, IconNames, StaticIcon
+# Checkmk 3.0 moved the icon types to cmk.web.utils.icons
+try:
+    from cmk.web.utils.icons import DynamicIcon, IconNames, StaticIcon
+except ImportError:
+    from cmk.gui.type_defs import DynamicIcon, IconNames, StaticIcon  # type: ignore[no-redef]
 from cmk.gui.wato import PERMISSION_SECTION_WATO, MainModuleTopicMaintenance
 from cmk.gui.watolib.main_menu import ABCMainModule, MainModuleTopic, main_module_registry
 

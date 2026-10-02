@@ -39,8 +39,10 @@ cmk.gui.config._get_default_config_from_legacy_plugins()).
 """
 from __future__ import annotations
 
+import inspect
+from typing import Any
+
 from cmk.gui.i18n import _
-from cmk.gui.valuespec import Checkbox, Integer
 from cmk.gui.watolib.config_domain_name import (
     ConfigVariable,
     ConfigVariableGroup,
@@ -50,72 +52,112 @@ from cmk.gui.watolib.config_domain_name import (
 )
 from cmk.gui.watolib.config_domains import ConfigDomainGUI
 
+# Checkmk 3.0 defines global settings with Form Specs (form_spec=),
+# 2.5 with valuespecs (valuespec=).
+_USE_FORM_SPEC = "form_spec" in inspect.signature(ConfigVariable.__init__).parameters
+
 ConfigVariableGroupMonitoringCoverageAnalyzer = ConfigVariableGroup(
     title=_("Monitoring Coverage Analyzer (MCA)"),
     sort_index=105,
 )
 config_variable_group_registry.register(ConfigVariableGroupMonitoringCoverageAnalyzer)
 
+_GENERATE_TITLE = "Generate per-host piggyback data (MCA)"
+_GENERATE_LABEL = "Generate piggyback data for the 'Checkmk Monitoring Coverage' service"
+_GENERATE_HELP = (
+    "If enabled, every full analysis run additionally writes a "
+    "piggyback JSON payload per host (source host name "
+    "'monitoring_coverage_analyzer'), which the agent-based check "
+    "plug-in turns into a 'Checkmk Monitoring Coverage' service "
+    "for that host after the next service discovery. "
+    "If disabled, nothing is written, and the piggyback data of "
+    "this source on this site is removed by the next refresh tick "
+    "(every 5 minutes) or analysis run. Copies already distributed "
+    "to remote sites by the piggyback hub are not removed directly; "
+    "they expire there with the maximum piggyback age and are then "
+    "removed by Checkmk."
+)
 
-def _valuespec_generate_piggyback_data(_context: GlobalSettingsContext) -> Checkbox:
+# Deliberately an integer in whole hours (not an Age in seconds), so
+# consumers cannot mix up seconds and hours.
+_INTERVAL_TITLE = "Full analysis run interval in hours (MCA)"
+_INTERVAL_HELP = (
+    "Minimum time (in hours) between two REAL full analysis runs "
+    "(Livestatus query + rule evaluation, producing new content). "
+    "The full run is checked once a day at 05:00 (cron job "
+    "installed by 'mcactl setup'), so the "
+    "effective granularity is whole days: 24 = daily, 48 = every "
+    "second day; values below 24 behave like 24. "
+    "Between full runs, a lightweight refresh tick (every 5 "
+    "minutes, fixed, not configurable) merely re-sends the last "
+    "computed content with a fresh piggyback transfer timestamp, "
+    "without recomputing anything."
+)
+
+
+def _valuespec_generate_piggyback_data(_context: GlobalSettingsContext) -> Any:
+    from cmk.gui.valuespec import Checkbox
+
     return Checkbox(
-        title=_("Generate per-host piggyback data (MCA)"),
-        label=_("Generate piggyback data for the 'Checkmk Monitoring Coverage' service"),
-        help=_(
-            "If enabled, every full analysis run additionally writes a "
-            "piggyback JSON payload per host (source host name "
-            "'monitoring_coverage_analyzer'), which the agent-based check "
-            "plug-in turns into a 'Checkmk Monitoring Coverage' service "
-            "for that host after the next service discovery. "
-            "If disabled, nothing is written, and the piggyback data of "
-            "this source on this site is removed by the next refresh tick "
-            "(every 5 minutes) or analysis run. Copies already distributed "
-            "to remote sites by the piggyback hub are not removed directly; "
-            "they expire there with the maximum piggyback age and are then "
-            "removed by Checkmk."
-        ),
+        title=_(_GENERATE_TITLE), label=_(_GENERATE_LABEL), help=_(_GENERATE_HELP),
         default_value=True,
     )
 
 
-ConfigVariableGeneratePiggybackData = ConfigVariable(
-    group=ConfigVariableGroupMonitoringCoverageAnalyzer,
-    primary_domain=ConfigDomainGUI,
-    ident="generate_piggyback_data",
-    valuespec=_valuespec_generate_piggyback_data,
-)
-config_variable_registry.register(ConfigVariableGeneratePiggybackData)
+def _form_spec_generate_piggyback_data(_context: GlobalSettingsContext) -> Any:
+    from cmk.rulesets.v1 import Help, Label, Title
+    from cmk.rulesets.v1.form_specs import BooleanChoice, DefaultValue
 
-
-def _valuespec_piggyback_interval_hours(_context: GlobalSettingsContext) -> Integer:
-    # Deliberately Integer instead of Age: ident "piggyback_interval_hours"
-    # holds the value directly in whole hours (not seconds as Age would
-    # return) - avoids a silent seconds/hours mix-up in later consumer
-    # code (_query_and_analyze_hosts() callers).
-    return Integer(
-        title=_("Full analysis run interval in hours (MCA)"),
-        help=_(
-            "Minimum time (in hours) between two REAL full analysis runs "
-            "(Livestatus query + rule evaluation, producing new content). "
-            "The full run is checked once a day at 05:00 (cron job "
-            "installed by 'mcactl setup'), so the "
-            "effective granularity is whole days: 24 = daily, 48 = every "
-            "second day; values below 24 behave like 24. "
-            "Between full runs, a lightweight refresh tick (every 5 "
-            "minutes, fixed, not configurable) merely re-sends the last "
-            "computed content with a fresh piggyback transfer timestamp, "
-            "without recomputing anything."
-        ),
-        default_value=24,
-        minvalue=1,
-        unit=_("hours"),
+    return BooleanChoice(
+        title=Title(_GENERATE_TITLE),
+        label=Label(_GENERATE_LABEL),
+        help_text=Help(_GENERATE_HELP),
+        prefill=DefaultValue(True),
     )
 
 
-ConfigVariablePiggybackIntervalHours = ConfigVariable(
-    group=ConfigVariableGroupMonitoringCoverageAnalyzer,
-    primary_domain=ConfigDomainGUI,
-    ident="piggyback_interval_hours",
-    valuespec=_valuespec_piggyback_interval_hours,
+def _valuespec_piggyback_interval_hours(_context: GlobalSettingsContext) -> Any:
+    from cmk.gui.valuespec import Integer
+
+    return Integer(
+        title=_(_INTERVAL_TITLE), help=_(_INTERVAL_HELP),
+        default_value=24, minvalue=1, unit=_("hours"),
+    )
+
+
+def _form_spec_piggyback_interval_hours(_context: GlobalSettingsContext) -> Any:
+    from cmk.rulesets.v1 import Help, Title
+    from cmk.rulesets.v1.form_specs import DefaultValue, Integer, validators
+
+    return Integer(
+        title=Title(_INTERVAL_TITLE),
+        help_text=Help(_INTERVAL_HELP),
+        prefill=DefaultValue(24),
+        unit_symbol="hours",
+        custom_validate=(validators.NumberInRange(min_value=1),),
+    )
+
+
+def _config_variable(ident: str, valuespec: Any, form_spec: Any) -> ConfigVariable:
+    spec = {"form_spec": form_spec} if _USE_FORM_SPEC else {"valuespec": valuespec}
+    return ConfigVariable(
+        group=ConfigVariableGroupMonitoringCoverageAnalyzer,
+        primary_domain=ConfigDomainGUI,
+        ident=ident,
+        **spec,
+    )
+
+
+ConfigVariableGeneratePiggybackData = _config_variable(
+    "generate_piggyback_data",
+    _valuespec_generate_piggyback_data,
+    _form_spec_generate_piggyback_data,
+)
+config_variable_registry.register(ConfigVariableGeneratePiggybackData)
+
+ConfigVariablePiggybackIntervalHours = _config_variable(
+    "piggyback_interval_hours",
+    _valuespec_piggyback_interval_hours,
+    _form_spec_piggyback_interval_hours,
 )
 config_variable_registry.register(ConfigVariablePiggybackIntervalHours)

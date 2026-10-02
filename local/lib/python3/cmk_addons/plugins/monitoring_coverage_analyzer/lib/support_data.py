@@ -558,10 +558,7 @@ def collect_raw(page: Any, root: str, site: str, with_runtime: bool) -> dict[str
     raw["setup_rules"] = []
     folders: set[str] = set()
     try:
-        from cmk.gui.watolib.rulesets import SingleRulesetRecursively
-
-        name = page._RULESET_NAME
-        ruleset = SingleRulesetRecursively.load_single_ruleset_recursively(name).get(name)
+        ruleset = page._load_mca_ruleset()
         for folder, _index, rule in ([] if ruleset is None else ruleset.get_rules()):
             path = folder.path()
             folders.update(p for p in path.split("/") if p)

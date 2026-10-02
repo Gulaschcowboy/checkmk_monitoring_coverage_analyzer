@@ -199,6 +199,15 @@ def cmd_uninstall(site: str, root: str) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _app_context():
+    """GUI application + request context (moved in Checkmk 3.0)."""
+    try:
+        from cmk.gui.wsgi.app import application_and_request_context
+    except ImportError:
+        from cmk.gui.utils.script_helpers import application_and_request_context
+    return application_and_request_context
+
+
 def _run_analysis() -> tuple[int, int, str | None]:
     """Loads the GUI and the page module and runs a complete analysis
     (including saving the result and writing piggyback data)."""
@@ -211,7 +220,7 @@ def _run_analysis() -> tuple[int, int, str | None]:
 
     main_modules.register(edition(cmk_paths.omd_root))
 
-    from cmk.gui.utils.script_helpers import application_and_request_context
+    application_and_request_context = _app_context()
 
     with application_and_request_context():
         # Page plug-ins are loaded by the GUI via exec() and are not
@@ -442,7 +451,7 @@ def _load_page_module_in_context() -> dict:
     from cmk.utils import paths as cmk_paths
 
     main_modules.register(edition(cmk_paths.omd_root))
-    from cmk.gui.utils.script_helpers import application_and_request_context
+    application_and_request_context = _app_context()
 
     def load():
         import importlib.util
