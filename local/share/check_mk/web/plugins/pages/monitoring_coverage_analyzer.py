@@ -2461,15 +2461,99 @@ def _current_page() -> int:
 
 
 def _page_vars(page: int | None = None, size: int | None = None) -> list[tuple[str, str]]:
-    """URL variables of the current (or the given) page; defaults omitted."""
+    """URL variables of the current (or the given) page and the search
+    filter; defaults omitted."""
     page = _current_page() if page is None else page
     size = _current_page_size() if size is None else size
     out: list[tuple[str, str]] = []
+    search = _current_search()
+    if search:
+        out.append(("search", search))
     if size != _DEFAULT_PAGE_SIZE:
         out.append(("limit", str(size)))
     if page > 1:
         out.append(("page", str(page)))
     return out
+
+
+# Free-text filter of the host table (URL variable "search"), similar to
+# the quicksearch: case-insensitive, all words must match the hostname or
+# the findings; a word is a regular expression if it is a valid one,
+# otherwise it is matched literally.
+def _current_search() -> str:
+    return " ".join((request.get_str_input("search") or "").split())[:200]
+
+
+def _search_patterns(search: str) -> list[re.Pattern[str]]:
+    patterns = []
+    for word in search.split():
+        try:
+            patterns.append(re.compile(word, re.IGNORECASE))
+        except re.error:
+            patterns.append(re.compile(re.escape(word), re.IGNORECASE))
+    return patterns
+
+
+def _filtered_results(results: Sequence[_HostResult], search: str) -> list[_HostResult]:
+    patterns = _search_patterns(search)
+    if not patterns:
+        return list(results)
+    return [
+        r for r in results
+        if all(p.search(f"{r.host_name}\n{r.findings}") for p in patterns)
+    ]
+
+
+def _show_search_form() -> None:
+    """Search field above the host table; filters while typing (short
+    delay, then reload on page 1) and keeps sorting and page size."""
+    # Plain GET form instead of html.begin_form(): that one adds the CSRF
+    # token and "filled_in" as hidden fields, which would end up in the URL
+    # (history, shared links) - not needed for a read-only filter.
+    html.write_html(HTML.without_escaping(
+        '<form method="GET" action="monitoring_coverage_analyzer.py" style="margin:6px 0">'
+    ))
+    html.text_input(
+        "search", _current_search(), size=40, id_="mca_search",
+        placeholder=_("Filter hostname and findings"),
+        title=_(
+            "Case-insensitive. All words must match the hostname or the findings; "
+            "regular expressions are allowed."
+        ),
+        oninput=(
+            "clearTimeout(window.mca_search_timer);"
+            "var f=this.form;"
+            "window.mca_search_timer=setTimeout(function(){f.submit();},600);"
+        ),
+    )
+    html.write_text(" ")
+    html.write_html(HTML.without_escaping('<input type="submit" class="button" value="')
+                    + HTML.with_escaping(_("Filter")) + HTML.without_escaping('">'))
+    if _current_search():
+        html.write_text(" ")
+        html.write_html(
+            html.render_a(
+                _("Reset"),
+                href=makeuri_contextless(
+                    request,
+                    ([("sort", s)] if (s := _current_sort()) else [])
+                    + ([("limit", str(n))] if (n := _current_page_size()) != _DEFAULT_PAGE_SIZE else []),
+                    filename="monitoring_coverage_analyzer.py",
+                ),
+            )
+        )
+    sort = _current_sort()
+    if sort:
+        html.hidden_field("sort", sort)
+    if _current_page_size() != _DEFAULT_PAGE_SIZE:
+        html.hidden_field("limit", str(_current_page_size()))
+    html.write_html(HTML.without_escaping("</form>"))
+    if request.has_var("search"):
+        # After filtering: focus back into the field, cursor at the end.
+        html.javascript(
+            "(function(){var i=document.getElementById('mca_search');"
+            "if(i){i.focus();var n=i.value.length;i.setSelectionRange(n,n);}})();"
+        )
 
 
 def _page_bounds(total: int, page: int, size: int) -> tuple[int, int, int, int]:
@@ -2521,7 +2605,9 @@ def _sortable_th(title: str, column: str, style: str | None = None) -> None:
     html.close_th()
 
 
-def _show_pager(total: int, page: int, pages: int, start: int, end: int) -> None:
+def _show_pager(
+    total: int, page: int, pages: int, start: int, end: int, unfiltered: int | None = None
+) -> None:
     """'Hosts 101-200 of 503' with page links and the page size choice."""
     sort = _current_sort()
     sort_vars = [("sort", sort)] if sort else []
@@ -2536,6 +2622,8 @@ def _show_pager(total: int, page: int, pages: int, start: int, end: int) -> None
 
     html.open_div(style="margin:6px 0")
     html.write_text(_("Hosts %d-%d of %d") % (start + 1, end, total) if total else _("No hosts"))
+    if unfiltered is not None and unfiltered != total:
+        html.write_text(" " + _("(filtered from %d)") % unfiltered)
     if pages > 1:
         html.write_text(" | ")
         if page > 1:
@@ -2854,9 +2942,15 @@ class PageMonitoringCoverageAnalyzer(Page):
             )
             return
 
+        _show_search_form()
+        unfiltered = len(results)
+        results = _filtered_results(results, _current_search())
         total = len(results)
+        if not results:
+            html.p(_("No hosts match the filter (%d hosts in total).") % unfiltered)
+            return
         start, end, page, pages = _page_bounds(total, _current_page(), _current_page_size())
-        _show_pager(total, page, pages, start, end)
+        _show_pager(total, page, pages, start, end, unfiltered)
         html.open_table(class_=("data", "table"))
         html.open_tr(class_="header")
         html.th("")  # expand arrow column
@@ -2933,8 +3027,8 @@ class PageMonitoringCoverageAnalyzer(Page):
             html.close_td()
             html.close_tr()
         html.close_table()
-        _show_pager(total, page, pages, start, end)
-        html.p(_("Number of hosts checked: %d") % total)
+        _show_pager(total, page, pages, start, end, unfiltered)
+        html.p(_("Number of hosts checked: %d") % unfiltered)
 
 
 page_registry.register(PageEndpoint("monitoring_coverage_analyzer", PageMonitoringCoverageAnalyzer()))
