@@ -36,6 +36,8 @@ finds the GUI page, the Setup rule and the global settings.
     configured interval (Global setting, default 24 h) has elapsed.
   - `rerun`: runs the analysis right away (also used by "Re-run
     analysis").
+  - `support-data`: collects anonymized data for a bug report (see
+    "Support data").
   - `refresh`, `status` and the `fullrun` due check do not load the
     Checkmk GUI and take well under a second; only an actual analysis run
     does.
@@ -131,6 +133,38 @@ disabled, no piggyback data is written, and data written earlier by this
 package is removed on the central site by the next refresh tick or
 analysis run. Copies already distributed to remote sites expire there
 with the maximum piggyback age and are then removed by Checkmk.
+
+## Support data
+
+```
+mcactl support-data
+```
+
+collects the MCA result and the facts it is based on into a JSON file
+that you can optionally attach to a bug report. Nothing is sent
+automatically. The data is used to analyze the report and, in aggregated
+form, to improve the detection rules.
+
+Before collecting, the tool lists what is included: the MCA result per
+host, your MCA Setup rules, Checkmk and package version, MCA settings, the
+rules file (its content only if modified locally), built-in host labels
+and tags, the names of the monitored check plug-ins (no service names)
+and the names of the agent sections. Custom labels and tag groups are
+only counted, rule comments are removed.
+
+Host, site, folder and server names, IP addresses and domains are
+replaced by pseudonyms such as `host-1a2b3c4d`. They are stable per site
+(the key stays on the site), so later reports use the same pseudonyms. A
+second file with the mapping pseudonym -> real name is written next to
+it: keep it, do not send it. At the end, strings that still look like a
+name or address are listed for you to check.
+
+The tool then asks whether to include the names of all Windows services,
+systemd units and processes per host. They are very helpful for finding
+undetected software, but they are not anonymized and may reveal
+applications or your organization. `--with-runtime` includes them without
+asking; without a terminal they are left out. `--output DIR` sets the
+directory (default: current directory).
 
 ## Repository layout
 

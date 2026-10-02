@@ -135,6 +135,14 @@ def load_evaluate_module() -> types.ModuleType:
     return evaluate
 
 
+def load_lib_module(name: str) -> types.ModuleType:
+    """A module of the package's lib/ (they import nothing from Checkmk at
+    module level)."""
+    if str(LIB_ROOT) not in sys.path:
+        sys.path.insert(0, str(LIB_ROOT))
+    return importlib.import_module(f"cmk_addons.plugins.monitoring_coverage_analyzer.lib.{name}")
+
+
 # --- building synthetic agent output -----------------------------------------
 
 

@@ -9,6 +9,7 @@ Run as the OMD site user:
     mcactl fullrun     run the analysis if the configured interval has elapsed (cron, daily)
     mcactl rerun       run the analysis right away (also started by the GUI page)
     mcactl refresh     re-send the last result as piggyback data (cron, every 5 min)
+    mcactl support-data  collect anonymized data for a bug report (see --help)
 """
 # MKPs cannot register cron jobs themselves (etc/cron.d/ is not a
 # PackagePart), hence "setup" copies the cron template shipped in the MKP.
@@ -31,7 +32,7 @@ import traceback
 PKG = "monitoring_coverage_analyzer"
 TOOL = "mcactl"
 ANALYSIS_MODES = ("fullrun", "rerun")
-COMMANDS = ("setup", "status", "uninstall", "fullrun", "rerun", "refresh")
+COMMANDS = ("setup", "status", "uninstall", "fullrun", "rerun", "refresh", "support-data")
 
 _TTY = sys.stdout.isatty()
 
@@ -276,6 +277,188 @@ def cmd_analysis(mode: str) -> int:
     return _analysis_job(runstate, mode)
 
 
+# ---------------------------------------------------------------------------
+# support-data
+# ---------------------------------------------------------------------------
+
+SUPPORT_DATA_HELP = """\
+mcactl support-data - collect data for a bug report (optional to send)
+
+    mcactl support-data [--with-runtime] [--output DIR] [--yes]
+
+Collects the MCA result and the facts it is based on into a JSON file.
+Nothing is sent anywhere: you decide whether to attach the file to a bug
+report. The data helps to analyze the report and, in aggregated form, to
+improve the detection rules.
+
+By default the file is anonymized: host, site, folder and server names,
+IP addresses and domains are replaced by pseudonyms (stable per site, so
+"host-1a2b3c4d" stays the same in later reports). A second file with the
+mapping pseudonym -> real name is written for you - keep it, do not send it.
+
+Options:
+  --with-runtime   include the names of Windows services, systemd units and
+                   processes per host without asking (asked interactively
+                   otherwise; without a terminal they are left out)
+  --output DIR     directory for the files (default: current directory)
+  --yes            do not ask, use the defaults
+  --no-anonymize   do not anonymize anything (only on request of the
+                   developer, the file then contains all real names)
+"""
+
+
+def _ask(question: str, default_yes: bool = True) -> bool:
+    suffix = "(Y/n)" if default_yes else "(y/N)"
+    try:
+        answer = input(f"  {question} {suffix} ").strip().lower()
+    except EOFError:
+        return default_yes
+    if not answer:
+        return default_yes
+    return answer in ("y", "yes", "j", "ja")
+
+
+def _write_private(path: str, payload: object) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=1, sort_keys=True, default=str)
+        handle.write("\n")
+
+
+def cmd_support_data(site: str, root: str, args: list[str]) -> int:
+    opts = {"--with-runtime": False, "--yes": False, "--no-anonymize": False}
+    outdir = os.getcwd()
+    rest = list(args)
+    while rest:
+        arg = rest.pop(0)
+        if arg in ("-h", "--help"):
+            print(SUPPORT_DATA_HELP)
+            return 0
+        if arg == "--output" and rest:
+            outdir = rest.pop(0)
+        elif arg in opts:
+            opts[arg] = True
+        else:
+            print(SUPPORT_DATA_HELP, file=sys.stderr)
+            return 2
+    if not os.path.isdir(outdir) or not os.access(outdir, os.W_OK):
+        return die(f"Output directory not writable: {outdir}")
+    interactive = sys.stdin.isatty() and not opts["--yes"]
+    anonymize = not opts["--no-anonymize"]
+
+    _header("Support data", site, root)
+    if anonymize:
+        print("  This collects, for every host analyzed by MCA:")
+        print("    - the MCA result (findings, evidence, coverage) and your MCA Setup rules")
+        print("    - Checkmk version, MKP version, MCA settings, the rules file in use")
+        print("    - built-in host labels and tags (cmk/...), custom ones only as a count")
+        print("    - names of the monitored check plug-ins (no service names)")
+        print("    - names of the agent sections and their line counts")
+        print()
+        print("  Host, site, folder and server names, IP addresses and domains are")
+        print("  replaced by pseudonyms. Nothing is sent: you decide whether to attach")
+        print("  the file to a bug report. It is used for the analysis and, in")
+        print("  aggregated form, to improve the detection rules.")
+        print()
+        with_runtime = opts["--with-runtime"]
+        if not with_runtime and interactive:
+            print("  Optional, but very helpful for finding undetected software:")
+            print("  the names of all Windows services, systemd units and processes per")
+            print("  host. These names are NOT anonymized and may reveal applications or")
+            print("  your organization (e.g. a service called 'acme-billing').")
+            with_runtime = _ask("Include service and process names?")
+            print()
+    else:
+        print("  " + _c("0;31;1", "--no-anonymize: NOTHING is anonymized."))
+        print("  The file contains all host, site and folder names, IP addresses,")
+        print("  labels, tags, service names, Setup rules and the names of all")
+        print("  Windows services, systemd units and processes of the analyzed hosts.")
+        print()
+        if not opts["--yes"]:
+            if not sys.stdin.isatty():
+                return die("--no-anonymize needs a terminal for the confirmation (or --yes).")
+            try:
+                answer = input("  Type 'yes' to continue: ").strip()
+            except EOFError:
+                answer = ""
+            if answer != "yes":
+                print("  Aborted.")
+                return 1
+        with_runtime = True
+
+    step("Collecting (this takes as long as an analysis run)")
+    from cmk_addons.plugins.monitoring_coverage_analyzer.lib import support_data
+
+    page_module = _load_page_module_in_context()
+    with page_module["context"]():
+        page = page_module["load"]()
+        raw = support_data.collect_raw(page, root, site, with_runtime)
+    if not raw.get("hosts"):
+        warn("No analysis result found - run 'mcactl rerun' first.")
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    if anonymize:
+        key = support_data.load_or_create_key(os.path.join(root, "var", "check_mk", f"{PKG}_support_data.key"))
+        doc, mapping = support_data.anonymize(raw, key, with_runtime)
+        base = os.path.join(outdir, f"mca-support-data-{doc['meta']['site']}-{stamp}")
+        out_file, map_file = base + ".json", base + "-mapping-KEEP-LOCAL.json"
+        _write_private(out_file, doc)
+        _write_private(map_file, mapping)
+        residual = support_data.residual_findings(
+            doc, support_data.identifying_names(mapping), ignore=support_data.residual_ignore(raw)
+        )
+    else:
+        doc = support_data.unanonymized(raw)
+        out_file, map_file = os.path.join(outdir, f"mca-support-data-{site}-{stamp}-UNANONYMIZED.json"), None
+        _write_private(out_file, doc)
+        residual = []
+    ok(f"{len(raw.get('hosts') or {})} hosts, {len(raw['meta'].get('errors') or [])} collection errors")
+
+    print()
+    print("  File to attach to the bug report:")
+    print(f"    {out_file}  ({os.path.getsize(out_file) // 1024 + 1} KiB)")
+    if map_file:
+        print("  Mapping pseudonym -> real name (keep it, do NOT send it):")
+        print(f"    {map_file}")
+        print()
+        print("  Included: MCA result, settings, rules, labels/tags, check plug-in names,")
+        print("  agent section names" + (", service and process names." if with_runtime else "."))
+        if residual:
+            print()
+            warn("The file still contains strings that look like names or addresses.")
+            print("       Please check them before sending:")
+            for line in residual:
+                print(f"         {line}")
+    print()
+    print("  Please look at the file before sending it.")
+    print()
+    return 0
+
+
+def _load_page_module_in_context() -> dict:
+    """GUI context factory and page module loader (see _run_analysis)."""
+    from cmk.ccc.version import edition
+    from cmk.gui import main_modules
+    from cmk.utils import paths as cmk_paths
+
+    main_modules.register(edition(cmk_paths.omd_root))
+    from cmk.gui.utils.script_helpers import application_and_request_context
+
+    def load():
+        import importlib.util
+        from pathlib import Path
+
+        plugin_path = Path(cmk_paths.local_web_dir) / "plugins" / "pages" / f"{PKG}.py"
+        spec = importlib.util.spec_from_file_location(f"{PKG}_page_module", plugin_path)
+        if spec is None or spec.loader is None:  # pragma: no cover - defensive
+            raise RuntimeError(f"cannot load GUI page module {plugin_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    return {"context": application_and_request_context, "load": load}
+
+
 def usage(stream=sys.stdout) -> None:
     print((__doc__ or "").strip(), file=stream)
 
@@ -284,10 +467,13 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] in ("-h", "--help", "help"):
         usage()
         return 0
-    if len(argv) != 2 or argv[1] not in COMMANDS:
+    if len(argv) < 2 or argv[1] not in COMMANDS or (len(argv) > 2 and argv[1] != "support-data"):
         usage(sys.stderr)
         return 2
     cmd = argv[1]
+    if cmd == "support-data" and any(a in ("-h", "--help") for a in argv[2:]):
+        print(SUPPORT_DATA_HELP)
+        return 0
 
     site = os.environ.get("OMD_SITE", "")
     root = os.environ.get("OMD_ROOT", "")
@@ -304,6 +490,8 @@ def main(argv: list[str]) -> int:
         return cmd_uninstall(site, root)
     if cmd == "refresh":
         return cmd_refresh()
+    if cmd == "support-data":
+        return cmd_support_data(site, root, argv[2:])
     return cmd_analysis(cmd)
 
 
