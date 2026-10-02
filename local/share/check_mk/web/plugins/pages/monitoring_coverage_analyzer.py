@@ -220,6 +220,9 @@ class _Rules(NamedTuple):
     # state (e.g. windows_tasks without matching tasks) - see
     # _analyze_host().
     empty_ok: frozenset[str] = frozenset()
+    # Check families built into the agent (found and monitored
+    # automatically): neither listed as monitored nor suggested.
+    agent_builtin_families: frozenset[str] = frozenset()
 
 
 class RulesLoadError(RuntimeError):
@@ -354,6 +357,9 @@ def _load_rules() -> _Rules:
         str(x).lower() for x in data.get("generic_ignore_families") or []
     )
     empty_ok = frozenset(str(x) for x in data.get("empty_ok") or [])
+    agent_builtin_families = frozenset(
+        str(x).lower() for x in data.get("agent_builtin_families") or []
+    )
     for pattern in [*section_data.values(), *no_data_lines]:
         try:
             re.compile(pattern)
@@ -368,7 +374,7 @@ def _load_rules() -> _Rules:
         )
     return _Rules(
         aliases, titles, hints, stop_tokens, detect, section_data, section_ignore, no_data_lines,
-        generic_ignore_families, empty_ok,
+        generic_ignore_families, empty_ok, agent_builtin_families,
     )
 
 
@@ -388,6 +394,7 @@ SECTION_IGNORE: frozenset[str] = frozenset()
 NO_DATA_LINES: list[str] = []
 GENERIC_IGNORE_FAMILIES: frozenset[str] = frozenset()
 EMPTY_OK: frozenset[str] = frozenset()
+AGENT_BUILTIN_FAMILIES: frozenset[str] = frozenset()
 
 
 def _reload_rules() -> None:
@@ -403,8 +410,9 @@ def _reload_rules() -> None:
     TITLES.update(rules.titles)
     HINTS.clear()
     HINTS.update(rules.hints)
-    global STOP_TOKENS, SECTION_IGNORE, GENERIC_IGNORE_FAMILIES, EMPTY_OK
+    global STOP_TOKENS, SECTION_IGNORE, GENERIC_IGNORE_FAMILIES, EMPTY_OK, AGENT_BUILTIN_FAMILIES
     STOP_TOKENS = rules.stop_tokens
+    AGENT_BUILTIN_FAMILIES = rules.agent_builtin_families
     EMPTY_OK = rules.empty_ok
     GENERIC_IGNORE_FAMILIES = rules.generic_ignore_families
     DETECT.clear()
@@ -1027,7 +1035,8 @@ def _match_condition(
 # Filters against nonsense:
 #   - families known to the rules file (TITLES/ALIASES) are decided
 #     exclusively by the curated logic (e.g. ZFS needs real data).
-#   - stop_tokens and generic_ignore_families of the rules file.
+#   - stop_tokens, generic_ignore_families and agent_builtin_families of
+#     the rules file.
 #   - family already monitored on the host (a check plug-in of the
 #     family is running).
 #   - family runs on almost all hosts of the same OS (base OS service),
@@ -1189,6 +1198,7 @@ def _generic_catalog() -> dict[str, _GenericFamily]:
             len(family) < _GENERIC_MIN_LEN
             or family in STOP_TOKENS
             or family in GENERIC_IGNORE_FAMILIES
+            or family in AGENT_BUILTIN_FAMILIES
             or _canonical_token(family) in TITLES
             or _canonical_token(name) in TITLES
         ):
@@ -1351,6 +1361,62 @@ def _generic_by_host(
     return found_by_host
 
 
+def _generic_monitored_family(plugin: str) -> str | None:
+    """Family of a running check plug-in that the rules file does not know
+    (same filters as the generic catalog), else None."""
+    family = _plugin_family(plugin)
+    if (
+        len(family) < _GENERIC_MIN_LEN
+        or family in STOP_TOKENS
+        or family in GENERIC_IGNORE_FAMILIES
+        or family in AGENT_BUILTIN_FAMILIES
+        or _canonical_token(family) in TITLES
+        or _canonical_token(plugin) in TITLES
+    ):
+        return None
+    return family
+
+
+def _generic_monitored_by_host(
+    agent_rows: Sequence[tuple[str, Mapping[str, str]]],
+    check_commands_by_host: Mapping[str, Sequence[str]],
+) -> dict[str, dict[str, list[str]]]:
+    """Monitored check plug-in families per host that are NOT in the rules
+    file (e.g. checks from MKPs nobody wrote a rule for): family -> running
+    plug-ins. Families running on almost all hosts of the same OS are
+    dropped (base OS checks), like for the generic candidates."""
+    by_host: dict[str, dict[str, list[str]]] = {}
+    os_by_host: dict[str, str] = {}
+    hosts_per_os: dict[str, int] = {}
+    for host_name, labels in agent_rows:
+        os_family = str(labels.get("cmk/os_family", "")).strip().lower() or "?"
+        os_by_host[host_name] = os_family
+        hosts_per_os[os_family] = hosts_per_os.get(os_family, 0) + 1
+        families: dict[str, set[str]] = {}
+        for cmd in check_commands_by_host.get(host_name, []):
+            if not cmd.startswith("check_mk-"):
+                continue
+            plugin = cmd[len("check_mk-"):].split("!")[0]
+            family = _generic_monitored_family(plugin)
+            if family is not None:
+                families.setdefault(family, set()).add(plugin)
+        by_host[host_name] = {f: sorted(p) for f, p in families.items()}
+    per_os_family: dict[tuple[str, str], int] = {}
+    for host_name, families in by_host.items():
+        for family in families:
+            key = (os_by_host[host_name], family)
+            per_os_family[key] = per_os_family.get(key, 0) + 1
+    for host_name, families in by_host.items():
+        os_family = os_by_host[host_name]
+        for family in list(families):
+            if (
+                hosts_per_os[os_family] >= _GENERIC_COMMON_MIN_HOSTS
+                and per_os_family[(os_family, family)] / hosts_per_os[os_family] >= _GENERIC_COMMON_RATIO
+            ):
+                del families[family]
+    return by_host
+
+
 class _Subsystem(NamedTuple):
     token: str
     title: str
@@ -1481,6 +1547,7 @@ def _analyze_host(
     discovery: Mapping[str, _DiscoveryCounts] | None = None,
     check_commands_by_host: Mapping[str, Sequence[str]] | None = None,
     cluster_commands: Mapping[str, Sequence[str]] | None = None,
+    generic_monitored: Mapping[str, list[str]] | None = None,
 ) -> _HostResult:
     """Coverage correlation for a single host (as of 0.9.0-b14).
 
@@ -1793,6 +1860,17 @@ def _analyze_host(
                 "(Setup > Distributed monitoring) and that the remote site is reachable."
             ),
         })
+    # Monitored checks the rules file does not know (e.g. from an MKP):
+    # listed under "Already monitored" and counted like curated ones.
+    for family, plugins in sorted((generic_monitored or {}).items()):
+        entry = (generic_catalog or {}).get(family)
+        items.append({
+            "kind": "monitored_generic", "token": f"generic:{family}",
+            "title": entry.title if entry is not None else family.title(),
+            "plugins": list(plugins),
+            "evidence": [f"check_command(s)='{', '.join(plugins)}'"],
+            "state": "monitored",
+        })
     for family, evidence in sorted((generic_found or {}).items()):
         entry = (generic_catalog or {}).get(family)
         if entry is None:
@@ -2071,6 +2149,14 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
         node: {c: check_commands_by_host.get(c, []) for c in clusters}
         for node, clusters in clusters_by_node.items()
     }
+    generic_monitored_by_host = _generic_monitored_by_host(
+        agent_rows,
+        {
+            h: [*check_commands_by_host.get(h, []),
+                *(c for cmds in cluster_commands_by_node.get(h, {}).values() for c in cmds)]
+            for h, _labels in agent_rows
+        },
+    )
     generic_by_host = _generic_by_host(
         agent_rows, sections_by_host,
         {
@@ -2094,6 +2180,7 @@ def _query_and_analyze_hosts_impl() -> Sequence[_HostResult]:
             generic_catalog=catalog,
             discovery=discovery_by_host.get(host_name),
             check_commands_by_host=check_commands_by_host,
+            generic_monitored=generic_monitored_by_host.get(host_name),
         )
         results.append(result)
 

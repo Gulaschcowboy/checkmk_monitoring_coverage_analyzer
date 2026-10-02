@@ -16,7 +16,18 @@ CANDIDATE = {"kind": "candidate", "token": "generic:acme", "title": "ACME", "plu
              "evidence": ["process 'acmed'"], "state": "possible match (fuzzy search)", "hint": ""}
 
 
+MONITORED_GENERIC = {"kind": "monitored_generic", "token": "generic:acmecloud", "title": "ACME Cloud",
+                     "plugins": ["acmecloud_info"], "evidence": [], "state": "monitored"}
+
+
 class EvaluateTest(unittest.TestCase):
+    def test_monitored_generic_is_listed_and_counted(self) -> None:
+        result = ev.evaluate([OPEN, MONITORED, MONITORED_GENERIC], None)
+        self.assertEqual((result.monitored_count, result.total_count), (2, 3))
+        self.assertIn("ACME Cloud: monitored (via acmecloud_info)", result.monitored_lines)
+        self.assertEqual(ev.evaluate([MONITORED_GENERIC], None).fraction_text,
+                         "1/1 monitorable subsystems monitored")
+
     def test_open_finding_is_warn(self) -> None:
         result = ev.evaluate([OPEN, MONITORED], None)
         self.assertEqual(result.status, "WARN")

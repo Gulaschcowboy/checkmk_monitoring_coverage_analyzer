@@ -44,6 +44,7 @@ class RulesFileTest(unittest.TestCase):
             {
                 "aliases", "titles", "hints", "stop_tokens", "detect", "section_data",
                 "no_data_lines", "section_ignore", "generic_ignore_families", "empty_ok",
+                "agent_builtin_families",
             },
         )
 

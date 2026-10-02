@@ -44,6 +44,9 @@ PLUGIN_CATALOG: list[tuple[str, str, str]] = [
     ("azure_ad_sync", "agent", "Microsoft Entra ID: Sync"),
     ("esx_vsphere_vm_cpu", "agent", "VMware ESX: VM CPU"),
     ("cisco_temperature", "snmp", "Cisco: Temperature"),
+    # Check plug-ins of an MKP the rules file does not know
+    ("acmecloud_info", "agent", "ACME Cloud: Info"),
+    ("acmecloud_users", "agent", "ACME Cloud: Users"),
 ]
 
 _CMK_MODULES = (
@@ -200,8 +203,10 @@ def analyze(
     generic = m._generic_candidates(
         m._runtime_facts(sections.sections), commands, catalog, m._os_name_tokens(labels)
     )
+    generic_monitored = m._generic_monitored_by_host([(host, labels)], by_host).get(host)
     result = m._analyze_host(
-        host, labels, commands, m._available_plugin_map(), sections, generic, catalog, None, by_host
+        host, labels, commands, m._available_plugin_map(), sections, generic, catalog, None, by_host,
+        generic_monitored=generic_monitored,
     )
     return list(result.items)
 

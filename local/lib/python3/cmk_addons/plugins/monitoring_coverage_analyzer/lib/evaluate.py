@@ -8,7 +8,9 @@ way. The analysis itself computes unfiltered and returns a list of items
 per host; status, coverage and texts are only produced here.
 
 Item (dict, JSON-serializable):
-  kind:     "monitored" | "open" | "candidate"
+  kind:     "monitored" | "open" | "candidate" | "monitored_generic"
+            (monitored check the rules file does not know, e.g. from an
+            MKP; counted like "monitored")
   token:    internal name ("mssql", "generic:xyz")
   title:    display name
   plugins:  available / active check plugins
@@ -147,7 +149,7 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
     rules = parse_ignore_rules(params)
     mode = generic_mode(params)
 
-    monitored = [i for i in items if i.get("kind") == "monitored"]
+    monitored = [i for i in items if i.get("kind") in ("monitored", "monitored_generic")]
     open_items: list[Mapping[str, Any]] = []
     candidates: list[Mapping[str, Any]] = []
     ignored_lines: list[str] = []

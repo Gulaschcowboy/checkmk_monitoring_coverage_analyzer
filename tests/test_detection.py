@@ -18,6 +18,7 @@ from _harness import (
     analyze,
     items_for,
     kinds,
+    load_page_module,
     processes,
     systemd_units,
     win_services,
@@ -181,6 +182,40 @@ class SectionDataTest(unittest.TestCase):
 class NoAgentDataTest(unittest.TestCase):
     def test_host_without_agent_output_has_no_open_findings(self) -> None:
         self.assertEqual([i for i in analyze("", labels=LINUX) if i["kind"] == "open"], [])
+
+
+class UnknownMonitoredCheckTest(unittest.TestCase):
+    """Running checks of a family the rules file does not know (e.g. from
+    an MKP) are listed as monitored, but not counted."""
+
+    def test_listed_as_monitored_generic(self) -> None:
+        items = analyze("", checks=["acmecloud_info", "acmecloud_users", "df", "cpu_loads"])
+        [item] = items_for(items, "generic:acmecloud")
+        self.assertEqual(item["kind"], "monitored_generic")
+        self.assertEqual(item["title"], "ACME Cloud")
+        self.assertEqual(item["plugins"], ["acmecloud_info", "acmecloud_users"])
+        # base checks (stop tokens) are not listed
+        self.assertEqual(items_for(items, "generic:df") + items_for(items, "generic:cpu"), [])
+
+    def test_agent_builtin_checks_are_not_listed(self) -> None:
+        items = analyze("", checks=["timesyncd", "postfix_mailq", "mknotifyd", "mkbackup"])
+        self.assertEqual([i for i in items if i["kind"] == "monitored_generic"], [])
+        items = analyze("", labels=WINDOWS_SERVER,
+                        checks=["winperf_processor_util", "systemtime", "windows_updates"])
+        self.assertEqual([i for i in items if i["kind"] == "monitored_generic"], [])
+
+    def test_known_family_is_not_listed_twice(self) -> None:
+        items = analyze(systemd_units("mariadb.service"), checks=["mysql_capacity"])
+        self.assertEqual(kinds(items, "mysql"), ["monitored"])
+        self.assertEqual([i for i in items if i["kind"] == "monitored_generic"], [])
+
+    def test_common_family_on_all_hosts_of_an_os_is_dropped(self) -> None:
+        m = load_page_module()
+        rows = [(f"h{n}", LINUX) for n in range(5)]
+        commands = {h: ["check_mk-acmecloud_info"] for h, _l in rows}
+        self.assertEqual(m._generic_monitored_by_host(rows, commands)["h0"], {})
+        commands["h0"].append("check_mk-nfsmounts")
+        self.assertEqual(m._generic_monitored_by_host(rows, commands)["h0"], {"nfsmounts": ["nfsmounts"]})
 
 
 if __name__ == "__main__":

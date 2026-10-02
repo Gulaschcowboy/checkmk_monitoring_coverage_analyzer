@@ -10,7 +10,6 @@
     "rabbitmq": "rabbitmq",
     "elasticsearch": "elasticsearch",
     "haproxy": "haproxy",
-    "postfix": "postfix",
     "nfsd": "nfsexports",
     "catalina": "jolokia", "tomcat": "jolokia", "jolokia": "jolokia",
     "ora": "oracle", "oracle": "oracle", "pmon": "oracle",
@@ -88,7 +87,7 @@
     "mysql": "MySQL / MariaDB", "postgres": "PostgreSQL",
     "apache": "Apache HTTP Server", "nginx": "NGINX", "redis": "Redis",
     "mongodb": "MongoDB", "docker": "Docker", "rabbitmq": "RabbitMQ",
-    "elasticsearch": "Elasticsearch", "graylog": "Graylog", "haproxy": "HAProxy", "postfix": "Postfix",
+    "elasticsearch": "Elasticsearch", "graylog": "Graylog", "haproxy": "HAProxy",
     "nfsexports": "NFS Server", "jolokia": "Java / Tomcat (Jolokia)",
     "oracle": "Oracle Database", "mssql": "Microsoft SQL Server",
     "iis": "Microsoft IIS", "msexch": "Microsoft Exchange",
@@ -141,7 +140,6 @@
     "elasticsearch": "Configure the 'Elasticsearch' special agent.",
     "graylog": "Graylog server detected. Configure the 'Graylog' special agent for it, then run discovery.",
     "haproxy": "Built into the Linux agent (needs socat and a readable stats socket) - run discovery.",
-    "postfix": "Built into the Linux agent (postfix_mailq) - run discovery.",
     "nfsexports": "Deploy the 'nfsexports' agent plug-in, then run discovery.",
     "jolokia": "Integrate Jolokia and deploy the 'mk_jolokia' agent plug-in.",
     "oracle": "Deploy the 'mk_oracle' agent plug-in (Linux/Unix) or 'mk_oracle.ps1' (Windows), then run discovery.",
@@ -240,9 +238,6 @@
     },
     "haproxy": {
       "runtime": ["systemd:^haproxy\\.service$"]
-    },
-    "postfix": {
-      "runtime": ["systemd:^postfix(@\\S*)?\\.service$"]
     },
     "oracle": {
       "runtime": ["process:^(ora|asm|xe|db)_pmon_", "process:(?i)^oracle\\.exe$", "winservice:^Oracle(ASM)?Service.+"]
@@ -345,6 +340,8 @@
   "section_ignore": ["hyperv_node"],
   "_comment_generic_ignore_families": "Check plug-in families never suggested by the generic match (names too common to be evidence). Families known from 'titles'/'aliases' are handled by the curated rules only.",
   "generic_ignore_families": ["local", "win", "job", "custom", "metric", "azure", "dotnet"],
+  "_comment_agent_builtin_families": "Check plug-in families built into the agent and monitored automatically by discovery: neither listed as monitored nor suggested by the generic match.",
+  "agent_builtin_families": ["mkbackup", "mknotifyd", "postfix", "systemtime", "timesyncd", "windows", "winperf"],
   "_comment_empty_ok": "Sections where a deployed plug-in with an empty section is a valid state (nothing to monitor), not a broken plug-in.",
   "empty_ok": ["windows_tasks"]
 }

@@ -54,7 +54,10 @@ finds the GUI page, the Setup rule and the global settings.
 
 ## Evidence sources
 
-1. Services already monitored (Livestatus check commands).
+1. Services already monitored (Livestatus check commands). Running checks
+   without a curated rule (e.g. from MKPs) are listed and counted as
+   monitored too, except base OS checks, stop tokens, `generic_ignore_families`
+   and `agent_builtin_families`.
 2. Host labels (except the operating system labels `cmk/os_*` and
    `cmk/site`; for built-in labels only the part after `cmk/` counts).
 3. Agent sections with real data (placeholder content does not count).
@@ -67,7 +70,8 @@ finds the GUI page, the Setup rule and the global settings.
    agent-based check plug-ins of the site, including installed MKPs. This
    finds subsystems without a curated rule. Built-in filters: SNMP-only
    plug-ins, families covered by curated rules, stop tokens,
-   `generic_ignore_families`, families already monitored on the host, and
+   `generic_ignore_families`, `agent_builtin_families`, families already
+   monitored on the host, and
    families running on nearly all hosts of the same OS. Shown as info by
    default (see Setup rule).
 

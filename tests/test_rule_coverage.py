@@ -47,7 +47,6 @@ CASES: dict[str, tuple[str, dict[str, str]]] = {
     "elasticsearch": (systemd_units("elasticsearch.service"), LINUX),
     "graylog": (systemd_units("graylog-server.service"), LINUX),
     "haproxy": (systemd_units("haproxy.service"), LINUX),
-    "postfix": (systemd_units("postfix@-.service"), LINUX),
     "oracle": (processes("ora_pmon_ORCL"), LINUX),
     "oracle_crs": (processes("ohasd.bin"), LINUX),
     "powerdns": (systemd_units("pdns-recursor.service"), LINUX),
