@@ -4,13 +4,13 @@
 # Checkmk does NOT read default values for ConfigVariable entries from the
 # ConfigVariable itself, but from the "config" legacy plugin namespace
 # (see cmk.gui.config._get_default_config_from_legacy_plugins() ->
-# utils.load_web_plugins("config", default_config) - verified live via grep
-# on the test site/Checkmk 2.5.0p12 Ultimate): every module attribute here
+# utils.load_web_plugins("config", default_config), Checkmk 2.5): every
+# module attribute here
 # with the same name as a ConfigVariable ident becomes the default value
 # of that variable, as long as it has not been set explicitly in
 # multisite.mk/multisite.d/*.mk.
 #
-# IMPORTANT PITFALL (discovered and verified live on the test site):
+# IMPORTANT PITFALL:
 # load_web_plugins("config", default_config) executes this file via
 # exec(compile(...), default_config), i.e. EVERY module attribute ends up
 # as a key in default_config - including a module DOCSTRING, which turns

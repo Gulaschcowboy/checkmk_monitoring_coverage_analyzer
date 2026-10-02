@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Global Setup options for the 'monitoring_coverage_analyzer' piggyback job.
 
-Extension stage 2.0.0 (piggyback extension, see PLAN_piggyback_background_job.md):
+Extension stage 2.0.0 (piggyback extension):
 
 Registers two new entries under Setup > Global settings, in a
 dedicated ConfigVariableGroup "Monitoring Coverage Analyzer":
@@ -12,21 +12,20 @@ dedicated ConfigVariableGroup "Monitoring Coverage Analyzer":
   - piggyback_interval_hours (Age/Integer in hours, default 24): after
     how many hours a new REAL full run (Livestatus query +
     rule evaluation) is due. The 5-minute refresh tick is deliberately
-    NOT configurable (see plan decision 7) and is therefore not
-    represented here as a separate variable.
+    NOT configurable and is therefore not represented here as a
+    separate variable.
 
-IMPORTANT FINDING (verified live on the test site / Checkmk 2.5.0p12 Ultimate
-via grep in cmk.gui.utils.plugins.register()/cmk.gui.utils.load_web_plugins()):
-this Checkmk version has NO legacy plugin namespace
+IMPORTANT FINDING (Checkmk 2.5, see cmk.gui.utils.plugins.register()/
+cmk.gui.utils.load_web_plugins()): this Checkmk version has NO legacy
+plugin namespace
 "globals" (only "config", "dashboard", "icons", "metrics", "pages",
 "perfometer", "sidebar", "views", "visuals", "wato" - see
-cmk.gui.utils.plugins.register()). The location
-share/check_mk/web/plugins/globals/ assumed in the original plan simply
-does not exist in this Checkmk version (load_web_plugins() is never called
+cmk.gui.utils.plugins.register()). A location
+share/check_mk/web/plugins/globals/ does not exist in this Checkmk
+version (load_web_plugins() is never called
 for "globals", so the file would NEVER be loaded).
 
-Pragmatic solution closest to the plan: the
-ConfigVariable/ConfigVariableGroup registration is instead done as a
+Therefore the ConfigVariable/ConfigVariableGroup registration is instead done as a
 regular "wato" legacy plugin (cmk.gui.wato.register() calls
 utils.load_web_plugins("wato", globals())) - this is exactly the
 mechanism also used by built-in Checkmk configuration variables such as

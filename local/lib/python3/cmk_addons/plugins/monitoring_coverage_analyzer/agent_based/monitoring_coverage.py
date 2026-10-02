@@ -1,29 +1,20 @@
 #!/usr/bin/env python3
 # Checkmk Monitoring Coverage - Agent-based Check-Plugin (Check API v2)
 #
-# Expansion stage 2.0.0 of the GUI page "monitoring_coverage_analyzer" (see
-# PLAN_piggyback_background_job.md): evaluates the piggyback section
+# Expansion stage 2.0.0 of the GUI page "monitoring_coverage_analyzer":
+# evaluates the piggyback section
 # "checkmk_monitoring_coverage", which is written per host by the GUI page
 # (see local/share/check_mk/web/plugins/pages/monitoring_coverage_analyzer.py,
 # functions _write_piggyback_data()/_run_piggyback_full()/
 # _run_piggyback_refresh()) under the piggyback source
 # "monitoring_coverage_analyzer".
 #
-# Deliberately a standalone plugin (own namespace
-# "monitoring_coverage_analyzer" under cmk_addons_plugins/, NOT under
-# the namespace of the reference project "monitoring_coverage") with
+# Namespace "monitoring_coverage_analyzer" under cmk_addons_plugins/,
 # check plugin/section "checkmk_monitoring_coverage", service
 # "Checkmk Monitoring Coverage".
 #
-# 0.9.0-b11: "2" suffix removed everywhere (file, section, check plugin,
-# function names; service name already in b10). The reference project
-# monitoring_coverage was discarded - compatibility/coexistence no longer
-# needed. Existing autochecks "checkmk_monitoring_coverage2" become
-# "Unimplemented check" after the update and must be replaced via
-# discovery.
-#
 # TWO SEPARATE TIMESTAMPS in the service output are MANDATORY
-# (transparency principle, plan decision 11, no exceptions):
+# (transparency principle, no exceptions):
 #   - "Content last computed: ..." - time of the last REAL
 #     full run (Livestatus query + rule evaluation, new content).
 #   - "Piggyback transfer last refreshed: ..." - time of the last
@@ -140,8 +131,7 @@ def check_monitoring_coverage(params: Mapping[str, Any], section: Mapping[str, A
             notice="\n".join(str(line) for line in detail_lines),
         )
 
-    # Plan decision 11: TWO SEPARATE timestamp lines, ALWAYS together,
-    # English wording exactly as specified in the plan.
+    # TWO SEPARATE timestamp lines, ALWAYS together (see header comment).
     last_full_run = section.get("last_full_run_timestamp")
     last_refresh = section.get("last_piggyback_refresh_timestamp")
 

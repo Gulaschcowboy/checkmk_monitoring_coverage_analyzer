@@ -6,7 +6,7 @@ the same mechanism used by cmk.gui.utils.plugins.register() ->
 utils.load_web_plugins("pages", globals()). Registration happens as an
 import-time side effect (page_registry.register(...) at module level).
 
-Expansion stage 1.3.0 (vs. 1.2.0 PoC):
+Expansion stage 1.3.0:
   UI polish (step 1):
   - The status cell now uses exactly the same CSS class as the regular
     Checkmk service table: "state svcstate state0/1/2" (see
@@ -34,9 +34,8 @@ Expansion stage 1.3.0 (vs. 1.2.0 PoC):
     back on the next page load - so it persists across
     multiple Apache/CMK GUI worker processes (not a pure
     in-memory cache). Deliberately re-implemented with json.dump()/json.load()
-    instead of cmk.ccc.store.save_object_to_file()/load_object_from_file()
-    (whose existence was verified live on the test site,
-    see research note below), to avoid a hard dependency on
+    instead of cmk.ccc.store.save_object_to_file()/load_object_from_file(),
+    to avoid a hard dependency on
     internal cmk.* module paths that may move between
     Checkmk versions - functionally equivalent
     (atomic write + simple read of a JSON file below
@@ -64,13 +63,11 @@ Scope (still deliberately reduced):
   - The analysis still runs SYNCHRONOUSLY (no cmk.gui.background_job):
     "cmk -L" is executed via subprocess EXACTLY ONCE per analysis run
     and reused for all hosts (see _available_plugin_map()
-    with a simple time-based cache, analogous to available_plugins() in the
-    reference special agent script). For production use with very many hosts /
+    with a simple time-based cache). For production use with very many hosts /
     more complex logic, it should nevertheless be switched to
     cmk.gui.background_job.
 
-Expansion stage 2.0.0 (piggyback extension, see
-PLAN_piggyback_background_job.md - all decisions there are final):
+Expansion stage 2.0.0 (piggyback extension):
   - New functions _build_piggyback_payload()/_write_piggyback_data()/
     _run_piggyback_full()/_run_piggyback_refresh(): create a JSON payload
     per host (findings/coverage/both timestamps) and write it
@@ -84,9 +81,8 @@ PLAN_piggyback_background_job.md - all decisions there are final):
     repeated store_piggyback_raw_data() call). Both timestamps are
     shown by the check plugin (see cmk_addons_plugins/monitoring_coverage_
     analyzer/agent_based/monitoring_coverage.py) as TWO SEPARATE
-    lines in the service output (transparency principle, plan
-    decision 11) - "Content last computed" vs. "Piggyback transfer
-    last refreshed".
+    lines in the service output (transparency principle) - "Content
+    last computed" vs. "Piggyback transfer last refreshed".
   - Two new GET parameters for the cron trigger:
       ?_cron_fullrun=1  -> full run (only if piggyback_interval_hours
                            has expired, unless _force=1 is set)
@@ -103,9 +99,7 @@ PLAN_piggyback_background_job.md - all decisions there are final):
     Checkmk's own CLI scripts such as cmk-update-config), NOT via an
     authenticated HTTP request: for a pure cron trigger this is
     simpler/more robust than an automation-user-secret solution
-    (no network round trip, no secret handling needed) and was explicitly
-    allowed by the plan as the preferred alternative ("if a
-    simpler, cleaner way exists ... prefer that"). The GET
+    (no network round trip, no secret handling needed). The GET
     parameter mechanism in this file remains nevertheless (also
     usable via a real HTTP request, e.g. for manual tests via curl
     with a GUI session cookie), only the bundled mcactl uses the
@@ -153,12 +147,11 @@ from cmk_addons.plugins.monitoring_coverage_analyzer.lib import runstate as _rs
 
 PAGE_TITLE = _("Analyze monitoring coverage")
 
-# Expansion stage 2.0.0: constants for the piggyback extension (see
-# PLAN_piggyback_background_job.md, decisions 4-7).
+# Expansion stage 2.0.0: constants for the piggyback extension.
 PIGGYBACK_SOURCE_HOSTNAME = "monitoring_coverage_analyzer"
 PIGGYBACK_SECTION_NAME = "checkmk_monitoring_coverage"
 PIGGYBACK_SERVICE_TITLE = "Checkmk Monitoring Coverage"
-# Hard-wired refresh tick interval (plan decision 7, NOT configurable) -
+# Hard-wired refresh tick interval (NOT configurable) -
 # not enforced by _run_piggyback_refresh() itself (the cron schedule does
 # that every 5 minutes), but documented here as a constant so it can be
 # looked up in one place.
@@ -272,7 +265,7 @@ def _rules_path() -> str:
     executed. In that case __file__ NO longer points to the
     actual installation directory share/check_mk/web/plugins/pages/,
     but to this synthetic intermediate path - the JSON file never lives
-    there, see the user's bug report ("...lib/python3/cmk/gui/utils/
+    there ("...lib/python3/cmk/gui/utils/
     monitoring_coverage_analyzer_rules.json ... could not be
     read").
 
@@ -455,8 +448,7 @@ except RulesLoadError:
     pass
 
 # Cache for "cmk -L" (available_plugins) - ONCE per analysis run, not per
-# host: analogous to available_plugins() in the reference special agent script
-# libexec/agent_monitoring_coverage.
+# host.
 _AVAILABLE_PLUGINS_CACHE_TTL = 60.0
 _available_plugins_cache: dict[str, tuple[float, Any]] = {}
 
@@ -592,8 +584,8 @@ _PIGGYBACK_MARKER_RE = re.compile(r"^<<<<(.*)>>>>\s*$")
 # automation-helper (cmk-automation-client). "@cached" sets
 # FileCacheOptions(use_outdated=True) -> the agent sources read the cache
 # files the core writes anyway, without an age limit, instead of querying
-# the agent again (verified live on the test site: mtime of the cache file
-# stays unchanged, ~0.2-0.5 s per host). Only if NO cache file at all exists
+# the agent again (the mtime of the cache file stays unchanged,
+# ~0.2-0.5 s per host). Only if NO cache file at all exists
 # yet for a source does the core fetch live (Checkmk's own behavior of
 # use_outdated, not controllable by us).
 # Compared to reading tmp/check_mk/cache/<host> directly, the automation
@@ -785,8 +777,8 @@ def _collect_agent_sections(
     host_names: Sequence[str], host_sites: Mapping[str, str] | None = None
 ) -> dict[str, _AgentSections]:
     """Agent sections for all hosts of an analysis run, in parallel
-    (measured live on the test site, 46 hosts: serial 23 s, 4 workers 8 s,
-    8 workers no further gain). Hosts on remote sites via
+    (example with 46 hosts: serial 23 s, 4 workers 8 s, 8 workers no
+    further gain). Hosts on remote sites via
     remote automation; if a site is unreachable, the remaining hosts of
     that site get the same error without another attempt."""
     host_sites = host_sites or {}
@@ -832,8 +824,8 @@ def _collect_agent_sections(
 _SUBSECTION_RE = re.compile(r"^\[[^\]]*\]$")
 
 # Processes in containers/LXC do not belong to this host - an agent
-# plug-in on the host could not monitor them either (seen on the test site:
-# MariaDB in an LXC container, nginx/redis in Docker).
+# plug-in on the host could not monitor them either (e.g. MariaDB in an
+# LXC container, nginx/redis in Docker).
 _CONTAINER_CGROUP_RE = re.compile(r"/lxc/|/docker[-/]|/libpod-|/machine\.slice/|/kubepods")
 
 _PLUGIN_SECTIONS = ("checkmk_agent_plugins_lnx", "checkmk_agent_plugins_win")
@@ -2247,8 +2239,8 @@ def _perfometer_style(coverage_pct: int, status: str | None = None) -> str:
 
 def _host_link(host_name: str) -> HTML:
     """Step 1b: clickable link to the "Service of host" page,
-    identical to the convention of regular Checkmk views. Looked up live on
-    the test site: the built-in view name for the host detail view
+    identical to the convention of regular Checkmk views. The built-in
+    view name for the host detail view
     (services of a single host) is "host", called as
     view.py?view_name=host&host=<hostname> - see
     cmk.gui.views.builtin_views (view ID "host") and
@@ -2472,7 +2464,7 @@ class PageMonitoringCoverageAnalyzer(Page):
 
         # 0.9.0-b15: visible feedback while the re-run is in progress - the
         # analysis is synchronous (page only responds after the run, approx.
-        # 10-15 s on the test site). On submit: disable the button (no
+        # 10-15 s for a few dozen hosts). On submit: disable the button (no
         # double click), show spinner + text. A disabled submit button is
         # NOT sent along, therefore "_analyze" is added as a hidden input.
         html.write_html(HTML.without_escaping(_RERUN_SPINNER_CSS))
