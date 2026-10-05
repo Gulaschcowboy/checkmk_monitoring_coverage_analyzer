@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Maintainer tool for MCA support data transport files (not packaged).
 
-    mca_support_key.py genkey
-        Creates a key pair. Store the private key in your password manager;
-        put the public key into lib/transport.py (MAINTAINER_PUBLIC_KEY).
-
-    mca_support_key.py decrypt FILE.json.enc [OUTPUT.json]
+    mca_support_tool.py decrypt FILE.json.enc [OUTPUT.json]
         Decrypts a transport file. The private key is read from the
         environment variable MCA_SUPPORT_KEY or asked for (hidden input).
+
+    mca_support_tool.py genkey
+        Creates a new key pair (only needed to replace the key). Store the
+        private key in your password manager; put the public key into
+        lib/transport.py (MAINTAINER_PUBLIC_KEY).
 
 Needs the Python package "cryptography".
 """
