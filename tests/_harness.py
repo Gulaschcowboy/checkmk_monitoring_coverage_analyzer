@@ -181,18 +181,23 @@ def analyze(
     checks: Sequence[str] = (),
     other_hosts: Mapping[str, Sequence[str]] | None = None,
     host: str = "testhost",
+    packages: Sequence[str] = (),
+    agent_error: str | None = None,
 ) -> list[dict[str, Any]]:
     """Runs the host analysis on synthetic agent output and returns the
     items (open/monitored/candidate findings) of the host.
 
     checks: check plug-in names already monitored on the host.
     other_hosts: host -> check plug-in names of other hosts of the site.
+    packages: installed packages of the host (HW/SW inventory).
+    agent_error: no agent data available (fetch error text).
     """
     m = load_page_module()
+    m._inventory_package_names = lambda host_name: list(packages)
     sections = m._AgentSections(
         m._parse_agent_sections(agent_output),
         "test",
-        None,
+        agent_error,
         m._parse_piggyback_sections(agent_output),
     )
     catalog = m._generic_catalog()

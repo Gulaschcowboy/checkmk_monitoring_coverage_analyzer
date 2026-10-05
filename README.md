@@ -64,7 +64,9 @@ finds the GUI page, the Setup rule and the global settings.
 4. Deployed agent plug-ins (`checkmk_agent_plugins_*` sections).
 5. Runtime evidence via `detect` rules: running systemd units, processes
    and Windows services.
-6. Installed inventory packages: informational only, no effect on status.
+6. Installed inventory packages: informational only, no effect on status,
+   except for `detect` rules with a `package:` condition (tools without a
+   running service, e.g. apt). These also count without current agent data.
 7. Generic match: the leading name part of running systemd units,
    processes and Windows services is matched against the families of all
    agent-based check plug-ins of the site, including installed MKPs. This

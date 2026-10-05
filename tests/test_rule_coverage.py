@@ -15,12 +15,14 @@ without a case here - add one when adding a rule.
 from __future__ import annotations
 
 import unittest
+from typing import Any
 
 from _harness import (
     LINUX,
     WINDOWS_CLIENT,
     WINDOWS_SERVER,
     analyze,
+    items_for,
     kinds,
     load_page_module,
     plugin_for,
@@ -32,7 +34,8 @@ from _harness import (
 W = WINDOWS_SERVER
 
 # token -> (agent output, labels)
-CASES: dict[str, tuple[str, dict[str, str]]] = {
+# Entry: (agent output, host labels[, installed packages])
+CASES: dict[str, tuple[Any, ...]] = {
     "zfs": ("<<<zpool>>>\ntank ONLINE\n", LINUX),
     "lvm": ("<<<diskstat>>>\n[dmsetup_info]\nvg0-root 253:0 vg0 root\n", LINUX),
     "md_raid": ("<<<md>>>\nmd0 : active raid1 sda1[0] sdb1[1]\n", LINUX),
@@ -41,6 +44,8 @@ CASES: dict[str, tuple[str, dict[str, str]]] = {
     "apache": (systemd_units("apache2.service"), LINUX),
     "nginx": (systemd_units("nginx.service"), LINUX),
     "sshd": (systemd_units("ssh.service"), LINUX),
+    # Tool without a running service: the installed package is the evidence.
+    "apt": ("", LINUX, ("apt", "apt-utils")),
     "redis": (systemd_units("redis-server.service"), LINUX),
     "mongodb": (systemd_units("mongod.service"), LINUX),
     "docker": (systemd_units("docker.service"), LINUX),
@@ -87,7 +92,17 @@ MONITORED_ELSEWHERE = {"entra_connect"}
 
 # Rules that must not fire on Windows (rules file: "not_on_os": ["windows"]).
 # Fixed here on purpose, so that a dropped "not_on_os" is noticed.
-NOT_ON_WINDOWS = {"smart", "sap_hana", "saprouter", "oracle_crs", "openvpn", "ibm_mq", "sshd"}
+NOT_ON_WINDOWS = {"smart", "sap_hana", "saprouter", "oracle_crs", "openvpn", "ibm_mq", "sshd", "apt"}
+
+
+def _case(token: str) -> tuple[str, dict[str, str], tuple[str, ...]]:
+    """CASES entry as (agent output, labels, installed packages)."""
+    output, labels, *packages = CASES[token]
+    return output, labels, tuple(packages[0]) if packages else ()
+
+
+def _cases() -> list[tuple[str, str, dict[str, str], tuple[str, ...]]]:
+    return [(token, *_case(token)) for token in CASES]
 
 
 class RuleCoverageTest(unittest.TestCase):
@@ -104,25 +119,25 @@ class RuleCoverageTest(unittest.TestCase):
         self.assertEqual(sorted(with_unless - set(EXCLUDED)), [])
 
     def test_detected_as_open(self) -> None:
-        for token, (output, labels) in CASES.items():
+        for token, output, labels, packages in _cases():
             with self.subTest(token=token):
-                self.assertEqual(kinds(analyze(output, labels=labels), token), ["open"])
+                self.assertEqual(kinds(analyze(output, labels=labels, packages=packages), token), ["open"])
 
     def test_monitored_with_own_check(self) -> None:
-        for token, (output, labels) in CASES.items():
+        for token, output, labels, packages in _cases():
             if token in MONITORED_ELSEWHERE:
                 continue
             with self.subTest(token=token):
-                items = analyze(output, labels=labels, checks=[plugin_for(token)])
+                items = analyze(output, labels=labels, packages=packages, checks=[plugin_for(token)])
                 self.assertEqual(kinds(items, token), ["monitored"])
 
     def test_not_on_windows(self) -> None:
         declared = {t for t, spec in self.detect.items() if "windows" in spec.get("not_on_os", [])}
         self.assertEqual(sorted(declared ^ NOT_ON_WINDOWS), [], "not_on_os differs from NOT_ON_WINDOWS")
         for token in sorted(NOT_ON_WINDOWS & set(CASES)):
-            output, _labels = CASES[token]
+            output, _labels, packages = _case(token)
             with self.subTest(token=token):
-                self.assertEqual(kinds(analyze(output, labels=W), token), [])
+                self.assertEqual(kinds(analyze(output, labels=W, packages=packages), token), [])
 
     def test_excluded(self) -> None:
         for token, (output, labels) in EXCLUDED.items():
@@ -133,6 +148,15 @@ class RuleCoverageTest(unittest.TestCase):
         # The real check plug-in name differs from the token.
         items = analyze(systemd_units("ssh.service"), labels=LINUX, checks=["sshd_config"])
         self.assertEqual(kinds(items, "sshd"), ["monitored"])
+
+    def test_package_rule(self) -> None:
+        # Only the exact package counts, not e.g. "apt-utils" alone.
+        self.assertEqual(kinds(analyze("", packages=["apt-utils"]), "apt"), [])
+        item = items_for(analyze("", packages=["apt"]), "apt")[0]
+        self.assertEqual(item["state"], "installed, not monitored")
+        self.assertIn("mk_apt", item["hint"])
+        # Package evidence also counts without current agent data.
+        self.assertEqual(kinds(analyze("", packages=["apt"], agent_error="no route to host"), "apt"), ["open"])
 
     def test_unrelated_host_has_no_curated_finding(self) -> None:
         output = systemd_units("cron.service", "dbus.service") + processes("bash")

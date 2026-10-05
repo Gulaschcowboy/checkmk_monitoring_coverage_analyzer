@@ -915,6 +915,8 @@ class _Runtime(NamedTuple):
     win_services_running: list[str]
     # 0.9.0-b21: service name -> display name (for the generic matching)
     win_service_titles: dict[str, str] = {}
+    # Installed packages from the HW/SW inventory (detect "package:" only)
+    packages: list[str] = []
 
 
 def _runtime_facts(sections: Mapping[str, list[str]]) -> _Runtime:
@@ -958,6 +960,10 @@ def _runtime_facts(sections: Mapping[str, list[str]]) -> _Runtime:
     return _Runtime(units, processes, services, service_titles)
 
 
+_PACKAGE_EVIDENCE = "package '{}' installed (HW/SW inventory)"
+_PACKAGE_EVIDENCE_PREFIX = _PACKAGE_EVIDENCE.partition("{")[0]
+
+
 def _match_condition(
     condition: str,
     sections: Mapping[str, list[str]],
@@ -973,6 +979,8 @@ def _match_condition(
       process:<regex>     - process name (without path), containers excluded
       winservice:<regex>  - running Windows service (service name)
       label:<name>:<regex> - host label value (used by "unless")
+      package:<regex>     - installed package (HW/SW inventory); only for
+                            tools without a running service (e.g. apt)
 
     Regex always via re.search - anchors (^...$) belong in the rule.
     """
@@ -1003,6 +1011,7 @@ def _match_condition(
             "systemd": (runtime.systemd_running, "systemd unit '{}' running"),
             "process": (runtime.processes, "process '{}'"),
             "winservice": (runtime.win_services_running, "Windows service '{}' running"),
+            "package": (runtime.packages, _PACKAGE_EVIDENCE),
         }.get(kind)
         if candidates is None:
             return None
@@ -1416,7 +1425,8 @@ class _Subsystem(NamedTuple):
     # 0.9.0-b14: "delivered" (section delivers data, discovery missing) |
     # "deployed" (plug-in deployed, but no own section - e.g. output goes
     # as piggyback to other hosts) | "running" (service/process running,
-    # plug-in missing) | "label" (host label only)
+    # plug-in missing) | "installed" (package installed, detect "package:")
+    # | "label" (host label only)
     kind: str = ""
 
 
@@ -1586,7 +1596,7 @@ def _analyze_host(
         agent_sections = _agent_sections(host_name)
     raw_sections = agent_sections.sections
     agent_plugins = _agent_plugin_names(raw_sections)
-    runtime = _runtime_facts(raw_sections)
+    runtime = _runtime_facts(raw_sections)._replace(packages=inv_packages)
 
     # Collect capabilities per token (type -> evidence).
     capability_evidence: dict[str, dict[str, list[str]]] = {}
@@ -1701,7 +1711,13 @@ def _analyze_host(
         elif T_PLUGIN in by_type:
             kind = "deployed"
         elif T_RUNTIME in by_type:
-            kind = "running"
+            # A package (detect "package:") is no running service; it also
+            # counts without current agent data (inventory + Livestatus).
+            kind = (
+                "installed"
+                if all(e.startswith(_PACKAGE_EVIDENCE_PREFIX) for e in by_type[T_RUNTIME])
+                else "running"
+            )
         else:
             kind = "label"
         subsystems.append(
@@ -1817,6 +1833,7 @@ def _analyze_host(
             "delivered": _("agent delivers data, not monitored"),
             "deployed": _("agent plug-in deployed, delivers no data"),
             "running": _("running, not monitored"),
+            "installed": _("installed, not monitored"),
         }.get(s.kind, _("detected, not monitored"))
         if s.kind == "delivered":
             # Data is already there - a plug-in deployment hint would be

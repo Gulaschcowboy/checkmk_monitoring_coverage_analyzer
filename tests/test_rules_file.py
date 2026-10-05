@@ -8,7 +8,7 @@ import unittest
 
 from _harness import RULES_FILE, load_page_module
 
-_CONDITION_KINDS = ("section", "systemd", "process", "winservice", "label")
+_CONDITION_KINDS = ("section", "systemd", "process", "winservice", "label", "package")
 _DETECT_KEYS = {"runtime", "direct", "unless", "not_on_os", "monitored_elsewhere", "piggyback_tokens"}
 _CONDITION_LISTS = ("runtime", "direct", "unless")
 

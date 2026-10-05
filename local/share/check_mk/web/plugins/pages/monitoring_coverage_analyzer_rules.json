@@ -196,7 +196,7 @@
     "tcpconn", "netif", "if", "interfaces", "hr", "snmp", "intel", "watchdog",
     "iptables", "mtr", "site", "monitoring_coverage_self"
   ],
-  "_comment_detect": "Evidence from agent output. Sections whose name maps to a token (via aliases) count automatically if they contain data. direct: extra conditions for 'data arrives' (discovery missing). runtime: service/process is running (agent plug-in missing). unless: conditions that void runtime evidence on a host (e.g. client OS, cloud VM); may also use label:<name>:<regex>. piggyback_tokens: tokens of the checks that the plug-in feeds as piggyback on other hosts. not_on_os: cmk/os_family values where the plug-in does not run. monitored_elsewhere: check plug-in regexes (full match); covered if any other host has such a service (centrally monitored, e.g. via a special agent). Conditions: section:<sec>[/<sub>]:data | section:<sec>[/<sub>]:contains:<regex> | systemd:<regex> | process:<regex> | winservice:<regex> (re.search, anchor as needed).",
+  "_comment_detect": "Evidence from agent output. Sections whose name maps to a token (via aliases) count automatically if they contain data. direct: extra conditions for 'data arrives' (discovery missing). runtime: service/process is running (agent plug-in missing). unless: conditions that void runtime evidence on a host (e.g. client OS, cloud VM); may also use label:<name>:<regex>. piggyback_tokens: tokens of the checks that the plug-in feeds as piggyback on other hosts. not_on_os: cmk/os_family values where the plug-in does not run. monitored_elsewhere: check plug-in regexes (full match); covered if any other host has such a service (centrally monitored, e.g. via a special agent). Conditions: section:<sec>[/<sub>]:data | section:<sec>[/<sub>]:contains:<regex> | systemd:<regex> | process:<regex> | winservice:<regex> | package:<regex> (installed package from the HW/SW inventory, for tools without a running service) (re.search, anchor as needed).",
   "detect": {
     "zfs": {
       "direct": ["section:zpool:data", "section:zpool_status:data"]
@@ -221,6 +221,10 @@
     },
     "sshd": {
       "runtime": ["systemd:^sshd?\\.service$", "process:^sshd$"],
+      "not_on_os": ["windows"]
+    },
+    "apt": {
+      "runtime": ["package:^apt$"],
       "not_on_os": ["windows"]
     },
     "redis": {
