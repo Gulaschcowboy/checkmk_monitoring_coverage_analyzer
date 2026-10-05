@@ -217,6 +217,12 @@ tests/                                       unit tests (not packaged)
 tools/                                       maintainer tools (not packaged)
 ```
 
+## Development
+
+MCA was developed with the help of AI coding assistants. Design
+decisions, review and testing on real Checkmk sites were done by the
+authors, who are responsible for the code.
+
 ## License
 
 Copyright (C) 2026 Alexander Wilms, Christian Wirtz
