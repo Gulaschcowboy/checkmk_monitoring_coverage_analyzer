@@ -228,7 +228,8 @@
       "not_on_os": ["windows"]
     },
     "redis": {
-      "runtime": ["systemd:^redis(-server)?(@\\S+)?\\.service$"]
+      "runtime": ["systemd:^redis(-server)?(@\\S+)?\\.service$", "process:^redis-server$"],
+      "not_on_os": ["windows"]
     },
     "mongodb": {
       "runtime": ["systemd:^mongod\\.service$"]

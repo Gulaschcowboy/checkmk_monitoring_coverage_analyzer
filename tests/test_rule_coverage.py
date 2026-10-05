@@ -92,7 +92,7 @@ MONITORED_ELSEWHERE = {"entra_connect"}
 
 # Rules that must not fire on Windows (rules file: "not_on_os": ["windows"]).
 # Fixed here on purpose, so that a dropped "not_on_os" is noticed.
-NOT_ON_WINDOWS = {"smart", "sap_hana", "saprouter", "oracle_crs", "openvpn", "ibm_mq", "sshd", "apt"}
+NOT_ON_WINDOWS = {"smart", "sap_hana", "saprouter", "oracle_crs", "openvpn", "ibm_mq", "sshd", "apt", "redis"}
 
 
 def _case(token: str) -> tuple[str, dict[str, str], tuple[str, ...]]:
@@ -148,6 +148,14 @@ class RuleCoverageTest(unittest.TestCase):
         # The real check plug-in name differs from the token.
         items = analyze(systemd_units("ssh.service"), labels=LINUX, checks=["sshd_config"])
         self.assertEqual(kinds(items, "sshd"), ["monitored"])
+
+    def test_redis_process_without_unit(self) -> None:
+        # Redis of a Checkmk site: started by omd, no systemd unit; mk_redis
+        # finds such instances through their unix socket.
+        ps = "<<<ps_lnx>>>\n[time]\n1\n[processes]\n[header] CGROUP USER VSZ RSS TIME ELAPSED PID COMMAND\n"
+        ps += "- site1 1 1 00:00:01 1 1 /omd/sites/site1/bin/redis-server unixsocket:/omd/sites/site1/tmp/run/redis\n"
+        self.assertEqual(kinds(analyze(ps), "redis"), ["open"])
+        self.assertEqual(kinds(analyze(processes("redis-server")), "redis"), ["open"])
 
     def test_package_rule(self) -> None:
         # Only the exact package counts, not e.g. "apt-utils" alone.
