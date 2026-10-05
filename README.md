@@ -139,33 +139,44 @@ with the maximum piggyback age and are then removed by Checkmk.
 ## Support data
 
 ```
-mcactl support-data
+mcactl support-data [--host HOST]
 ```
 
-collects the MCA result and the facts it is based on into a JSON file
-that you can optionally attach to a bug report. Nothing is sent
-automatically. The data is used to analyze the report and, in aggregated
-form, to improve the detection rules.
+collects the MCA result and the facts it is based on for a bug report.
+Before anything is written, it shows you the actual content: a summary,
+strings that still look like a name or address, and on request the full
+content. You then decide whether to create the file or abort. Nothing is
+sent automatically.
 
-Before collecting, the tool lists what is included: the MCA result per
-host, your MCA Setup rules, Checkmk and package version, MCA settings, the
-rules file (its content only if modified locally), built-in host labels
-and tags, the names of the monitored check plug-ins (no service names)
-and the names of the agent sections. Custom labels and tag groups are
-only counted, rule comments are removed.
+The file is encrypted: only the maintainer can read it, so you can attach
+it to a bug report. The data is used to analyze the report and, in
+aggregated form, to improve the detection rules.
+
+Included: the MCA result per host, your MCA Setup rules, Checkmk and
+package version, MCA settings, the rules file (its content only if
+modified locally), built-in host labels and tags, the names of the
+monitored check plug-ins (no service names) and the names of the agent
+sections. Custom labels and tag groups are only counted, rule comments
+are removed. `--host HOST` restricts the data to one host and the MCA
+Setup rules that apply to it.
 
 Host, site, folder and server names, IP addresses and domains are
 replaced by pseudonyms such as `host-1a2b3c4d`. They are stable per site
-(the key stays on the site), so later reports use the same pseudonyms. A
-second file with the mapping pseudonym -> real name is written next to
-it: keep it, do not send it. At the end, strings that still look like a
-name or address are listed for you to check.
+(the key stays on the site), so later reports use the same pseudonyms.
+When a reply refers to a host pseudonym, look up the host with
 
-The tool then asks whether to include the names of all Windows services,
-systemd units and processes per host. They are very helpful for finding
-undetected software, but they are not anonymized and may reveal
-applications or your organization. `--with-runtime` includes them without
-asking; without a terminal they are left out. `--output DIR` sets the
+```
+mcactl support-data resolve host-1a2b3c4d
+```
+
+(without a pseudonym: all hosts). A host deleted or renamed since the
+report is not found.
+
+The tool also asks whether to include the names of all Windows services,
+systemd units and processes per host (default: no). They are very helpful
+for finding undetected software, but they are not anonymized and may
+reveal applications or your organization. `--with-runtime` includes them
+without asking. `--yes` skips the dialog, `--output DIR` sets the
 directory (default: current directory).
 
 ## Repository layout
@@ -179,4 +190,5 @@ local/share/check_mk/web/plugins/wato/       menu entry, global settings
 local/share/check_mk/web/plugins/config/     config defaults
 local/share/doc/monitoring_coverage_analyzer cron template
 tests/                                       unit tests (not packaged)
+tools/                                       maintainer tools (not packaged)
 ```

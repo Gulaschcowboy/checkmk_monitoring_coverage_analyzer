@@ -9,7 +9,7 @@ Run as the OMD site user:
     mcactl fullrun     run the analysis if the configured interval has elapsed (cron, daily)
     mcactl rerun       run the analysis right away (also started by the GUI page)
     mcactl refresh     re-send the last result as piggyback data (cron, every 5 min)
-    mcactl support-data  collect anonymized data for a bug report (see --help)
+    mcactl support-data  create an encrypted support file for a bug report (see --help)
 """
 # MKPs cannot register cron jobs themselves (etc/cron.d/ is not a
 # PackagePart), hence "setup" copies the cron template shipped in the MKP.
@@ -291,28 +291,33 @@ def cmd_analysis(mode: str) -> int:
 # ---------------------------------------------------------------------------
 
 SUPPORT_DATA_HELP = """\
-mcactl support-data - collect data for a bug report (optional to send)
+mcactl support-data - create an encrypted support file for a bug report
 
-    mcactl support-data [--with-runtime] [--output DIR] [--yes]
+    mcactl support-data [--host HOST] [--with-runtime] [--output DIR] [--yes]
+    mcactl support-data resolve [PSEUDONYM ...]
 
-Collects the MCA result and the facts it is based on into a JSON file.
-Nothing is sent anywhere: you decide whether to attach the file to a bug
-report. The data helps to analyze the report and, in aggregated form, to
-improve the detection rules.
+Collects the MCA result and the facts it is based on, shows you what is
+included and, after your confirmation, writes an encrypted transport file.
+Only the maintainer can read it, so it may be attached to a (public) bug
+report. Nothing is sent anywhere. The data helps to analyze the report and,
+in aggregated form, to improve the detection rules.
 
-By default the file is anonymized: host, site, folder and server names,
-IP addresses and domains are replaced by pseudonyms (stable per site, so
+The content is anonymized: host, site, folder and server names, IP
+addresses and domains are replaced by pseudonyms (stable per site, so
 "host-1a2b3c4d" stays the same in later reports). A second file with the
-mapping pseudonym -> real name is written for you - keep it, do not send it.
+"resolve" shows the real host name of a pseudonym from a reply (without a
+pseudonym: all hosts). It recomputes the pseudonyms from the current hosts,
+so a host deleted or renamed since the report is not found.
 
 Options:
+  --host HOST      only this host (and the MCA Setup rules that apply to it)
   --with-runtime   include the names of Windows services, systemd units and
                    processes per host without asking (asked interactively
-                   otherwise; without a terminal they are left out)
+                   otherwise; with --yes they are left out)
   --output DIR     directory for the files (default: current directory)
-  --yes            do not ask, use the defaults
+  --yes            no dialog: create the transport file right away
   --no-anonymize   do not anonymize anything (only on request of the
-                   developer, the file then contains all real names)
+                   maintainer, the file then contains all real names)
 """
 
 
@@ -334,9 +339,68 @@ def _write_private(path: str, payload: object) -> None:
         handle.write("\n")
 
 
+def _write_private_bytes(path: str, payload: bytes) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(payload)
+
+
+def _choose_transport(doc: object) -> bool:
+    """Dialog: view the content, create the transport file or abort."""
+    import pydoc
+
+    while True:
+        try:
+            answer = input("  [v] View the full content   [c] Create the encrypted file   [a] Abort: ")
+        except EOFError:
+            answer = "a"
+        answer = answer.strip().lower()
+        if answer in ("v", "view"):
+            pydoc.pager(json.dumps(doc, indent=1, sort_keys=True, default=str))
+        elif answer in ("c", "create"):
+            return True
+        elif answer in ("a", "abort", "q"):
+            return False
+
+
+def _all_host_names() -> list[str]:
+    """Host names of all sites (same source as the support data)."""
+    page_module = _load_page_module_in_context()
+    with page_module["context"]():
+        from cmk.gui import sites
+
+        rows = sites.live().query("GET hosts\nColumns: name\n")
+    return [row[0] for row in rows]
+
+
+def cmd_support_data_resolve(site: str, root: str, pseudonyms: list[str]) -> int:
+    from cmk_addons.plugins.monitoring_coverage_analyzer.lib import support_data
+
+    bad = [p for p in pseudonyms if not support_data.is_host_pseudonym(p)]
+    if bad:
+        return die(f"Not a host pseudonym: {', '.join(bad)} (expected e.g. host-1a2b3c4d)")
+    key_path = os.path.join(root, "var", "check_mk", f"{PKG}_support_data.key")
+    if not os.path.exists(key_path):
+        return die("No support data key on this site - no report was created here yet.")
+    key = support_data.load_or_create_key(key_path)
+    found = support_data.resolve_hosts(key, _all_host_names(), pseudonyms)
+    width = max((len(p) for p in found), default=0)
+    missing = 0
+    for pseudonym, names in found.items():
+        if names:
+            print(f"  {pseudonym.ljust(width)}  {', '.join(names)}")
+        else:
+            missing += 1
+            print(f"  {pseudonym.ljust(width)}  not found (host deleted or renamed since the report?)")
+    return 1 if missing else 0
+
+
 def cmd_support_data(site: str, root: str, args: list[str]) -> int:
+    if args[:1] == ["resolve"]:
+        return cmd_support_data_resolve(site, root, args[1:])
     opts = {"--with-runtime": False, "--yes": False, "--no-anonymize": False}
     outdir = os.getcwd()
+    only_host = None
     rest = list(args)
     while rest:
         arg = rest.pop(0)
@@ -345,6 +409,8 @@ def cmd_support_data(site: str, root: str, args: list[str]) -> int:
             return 0
         if arg == "--output" and rest:
             outdir = rest.pop(0)
+        elif arg == "--host" and rest:
+            only_host = rest.pop(0)
         elif arg in opts:
             opts[arg] = True
         else:
@@ -352,12 +418,20 @@ def cmd_support_data(site: str, root: str, args: list[str]) -> int:
             return 2
     if not os.path.isdir(outdir) or not os.access(outdir, os.W_OK):
         return die(f"Output directory not writable: {outdir}")
-    interactive = sys.stdin.isatty() and not opts["--yes"]
+    if not opts["--yes"] and not sys.stdin.isatty():
+        return die("support-data asks for confirmation and needs a terminal (or --yes).")
+    interactive = not opts["--yes"]
     anonymize = not opts["--no-anonymize"]
+
+    from cmk_addons.plugins.monitoring_coverage_analyzer.lib import support_data, transport
+
+    if not transport.public_key_configured():
+        return die("This package contains no maintainer key, no transport file can be created.")
 
     _header("Support data", site, root)
     if anonymize:
-        print("  This collects, for every host analyzed by MCA:")
+        scope = f"for the host {only_host}" if only_host else "for every host analyzed by MCA"
+        print(f"  This collects, {scope}:")
         print("    - the MCA result (findings, evidence, coverage) and your MCA Setup rules")
         print("    - Checkmk version, MKP version, MCA settings, the rules file in use")
         print("    - built-in host labels and tags (cmk/...), custom ones only as a count")
@@ -365,9 +439,7 @@ def cmd_support_data(site: str, root: str, args: list[str]) -> int:
         print("    - names of the agent sections and their line counts")
         print()
         print("  Host, site, folder and server names, IP addresses and domains are")
-        print("  replaced by pseudonyms. Nothing is sent: you decide whether to attach")
-        print("  the file to a bug report. It is used for the analysis and, in")
-        print("  aggregated form, to improve the detection rules.")
+        print("  replaced by pseudonyms. You see the content before anything is written.")
         print()
         with_runtime = opts["--with-runtime"]
         if not with_runtime and interactive:
@@ -375,7 +447,7 @@ def cmd_support_data(site: str, root: str, args: list[str]) -> int:
             print("  the names of all Windows services, systemd units and processes per")
             print("  host. These names are NOT anonymized and may reveal applications or")
             print("  your organization (e.g. a service called 'acme-billing').")
-            with_runtime = _ask("Include service and process names?")
+            with_runtime = _ask("Include service and process names?", default_yes=False)
             print()
     else:
         print("  " + _c("0;31;1", "--no-anonymize: NOTHING is anonymized."))
@@ -383,9 +455,7 @@ def cmd_support_data(site: str, root: str, args: list[str]) -> int:
         print("  labels, tags, service names, Setup rules and the names of all")
         print("  Windows services, systemd units and processes of the analyzed hosts.")
         print()
-        if not opts["--yes"]:
-            if not sys.stdin.isatty():
-                return die("--no-anonymize needs a terminal for the confirmation (or --yes).")
+        if interactive:
             try:
                 answer = input("  Type 'yes' to continue: ").strip()
             except EOFError:
@@ -396,50 +466,50 @@ def cmd_support_data(site: str, root: str, args: list[str]) -> int:
         with_runtime = True
 
     step("Collecting (this takes as long as an analysis run)")
-    from cmk_addons.plugins.monitoring_coverage_analyzer.lib import support_data
-
     page_module = _load_page_module_in_context()
     with page_module["context"]():
         page = page_module["load"]()
-        raw = support_data.collect_raw(page, root, site, with_runtime)
+        raw = support_data.collect_raw(page, root, site, with_runtime, only_host)
     if not raw.get("hosts"):
+        if only_host:
+            return die(f"Host '{only_host}' is not in the MCA result (exact host name needed).")
         warn("No analysis result found - run 'mcactl rerun' first.")
 
-    stamp = time.strftime("%Y%m%d-%H%M%S")
     if anonymize:
         key = support_data.load_or_create_key(os.path.join(root, "var", "check_mk", f"{PKG}_support_data.key"))
         doc, mapping = support_data.anonymize(raw, key, with_runtime)
-        base = os.path.join(outdir, f"mca-support-data-{doc['meta']['site']}-{stamp}")
-        out_file, map_file = base + ".json", base + "-mapping-KEEP-LOCAL.json"
-        _write_private(out_file, doc)
-        _write_private(map_file, mapping)
         residual = support_data.residual_findings(
             doc, support_data.identifying_names(mapping), ignore=support_data.residual_ignore(raw)
         )
+        name = doc["meta"]["site"]
     else:
-        doc = support_data.unanonymized(raw)
-        out_file, map_file = os.path.join(outdir, f"mca-support-data-{site}-{stamp}-UNANONYMIZED.json"), None
-        _write_private(out_file, doc)
-        residual = []
-    ok(f"{len(raw.get('hosts') or {})} hosts, {len(raw['meta'].get('errors') or [])} collection errors")
+        doc, mapping, residual, name = support_data.unanonymized(raw), None, [], f"{site}-UNANONYMIZED"
+    ok(f"{len(raw.get('hosts') or {})} host(s), {len(raw['meta'].get('errors') or [])} collection errors")
 
     print()
-    print("  File to attach to the bug report:")
-    print(f"    {out_file}  ({os.path.getsize(out_file) // 1024 + 1} KiB)")
-    if map_file:
-        print("  Mapping pseudonym -> real name (keep it, do NOT send it):")
-        print(f"    {map_file}")
+    print("  Content of the support file:")
+    for line in support_data.summary(doc, residual):
+        print(f"    {line}")
+    if residual:
         print()
-        print("  Included: MCA result, settings, rules, labels/tags, check plug-in names,")
-        print("  agent section names" + (", service and process names." if with_runtime else "."))
-        if residual:
-            print()
-            warn("The file still contains strings that look like names or addresses.")
-            print("       Please check them before sending:")
-            for line in residual:
-                print(f"         {line}")
+        warn("Some strings still look like names or addresses - view the content")
+        print("       and abort if they should not leave your organization.")
     print()
-    print("  Please look at the file before sending it.")
+    if interactive and not _choose_transport(doc):
+        print("  Aborted, nothing was written.")
+        print()
+        return 1
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    base = os.path.join(outdir, f"mca-support-data-{name}-{stamp}")
+    out_file = base + ".json.enc"
+    _write_private_bytes(out_file, transport.encrypt(doc))
+    print()
+    print("  Encrypted file to attach to the bug report (only the maintainer can read it):")
+    print(f"    {out_file}  ({os.path.getsize(out_file) // 1024 + 1} KiB)")
+    if mapping:
+        print("  The maintainer only sees pseudonyms such as host-1a2b3c4d. To look up")
+        print("  the host a reply refers to, run: mcactl support-data resolve <pseudonym>")
     print()
     return 0
 

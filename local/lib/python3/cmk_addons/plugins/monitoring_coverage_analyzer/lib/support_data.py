@@ -349,6 +349,7 @@ def anonymize(raw: Mapping[str, Any], key: bytes, with_runtime: bool) -> tuple[d
         "num_sites": len(raw.get("site_ids", [])),
         "num_hosts_total": len(raw.get("all_host_names", [])),
         "num_hosts_analyzed": len(raw.get("hosts", {})),
+        "single_host": bool(meta.get("single_host")),
         "cron_active": meta.get("cron_active"),
         "piggyback_enabled": meta.get("piggyback_enabled"),
         "piggyback_interval_hours": meta.get("piggyback_interval_hours"),
@@ -415,6 +416,30 @@ def anonymize(raw: Mapping[str, Any], key: bytes, with_runtime: bool) -> tuple[d
     return doc, mapping
 
 
+_HOST_PSEUDONYM_RE = re.compile(r"^(?:host|server)-[0-9a-f]{8}$")
+
+
+def resolve_hosts(key: bytes, host_names: Iterable[str], pseudonyms: Iterable[str]) -> dict[str, list[str]]:
+    """Real host names for host pseudonyms ("mcactl support-data resolve").
+    Pseudonyms are derived from the site key and the name, so they can be
+    recomputed from the current hosts instead of keeping a mapping file.
+    The site's own server gets "server-..." if it is a monitored host too.
+    Empty pseudonyms: all hosts. Unknown pseudonyms map to []."""
+    ps = Pseudonymizer(key)
+    table: dict[str, list[str]] = {}
+    for name in sorted(set(host_names)):
+        for kind in ("host", "server"):
+            table.setdefault(ps.pseudonym(kind, name), []).append(name)
+    wanted = [p.strip().lower() for p in pseudonyms if p.strip()]
+    if not wanted:
+        return {p: names for p, names in sorted(table.items(), key=lambda kv: kv[1]) if p.startswith("host-")}
+    return {p: table.get(p, []) for p in wanted}
+
+
+def is_host_pseudonym(value: str) -> bool:
+    return bool(_HOST_PSEUDONYM_RE.match(value.strip().lower()))
+
+
 def identifying_names(mapping: Mapping[str, str]) -> list[str]:
     """Real names of hosts, sites, servers, folders, domains and IPs from the
     mapping (not the masked service/process names), incl. short host names."""
@@ -425,6 +450,42 @@ def identifying_names(mapping: Mapping[str, str]) -> list[str]:
             if "." in real and not _IPV4_RE.fullmatch(real):
                 out.add(real.partition(".")[0])
     return sorted(out)
+
+
+def summary(doc: Mapping[str, Any], residual: Iterable[str] = ()) -> list[str]:
+    """Overview of the actual content of the document, shown before the user
+    decides whether to create the transport file."""
+    meta = doc.get("meta") or {}
+    hosts = doc.get("hosts") or {}
+    plugins = sorted({p for h in hosts.values() for p in h.get("check_plugins") or []})
+    sections = sorted({s for h in hosts.values() for s in ((h.get("agent") or {}).get("sections") or {})})
+    example = next(iter(hosts), "")
+    rules = doc.get("setup_rules") or []
+    rules_file = doc.get("rules_file") or {}
+
+    def names(values: list[str]) -> str:
+        shown = ", ".join(values[:5])
+        return f"{len(values)} names ({shown}{', ...' if len(values) > 5 else ''})" if values else "none"
+
+    lines = [
+        f"Checkmk:          {meta.get('checkmk_version')} {meta.get('edition') or ''}".rstrip(),
+        f"MCA package:      {meta.get('mkp_version')}",
+        f"Hosts:            {len(hosts)}" + (f" (pseudonymized, e.g. {example})" if example else "")
+        + (" - single host" if meta.get("single_host") else f" of {meta.get('num_hosts_total')} on the site"),
+        f"Setup rules:      {len(rules)} MCA rule(s), comments removed, conditions only as a count",
+        "Rules file:       "
+        + ("content included (modified locally)" if "content" in rules_file else "checksum only (unmodified)"),
+        f"Check plug-ins:   {names(plugins)}",
+        f"Agent sections:   {names(sections)}",
+        "Service/process names: " + ("included (not anonymized)" if meta.get("with_runtime") else "not included"),
+    ]
+    residual = list(residual)
+    if residual:
+        lines.append(f"Still looks like a name or address: {len(residual)} entr{'y' if len(residual) == 1 else 'ies'}")
+        lines.extend(f"  - {r}" for r in residual)
+    else:
+        lines.append("Still looks like a name or address: nothing found")
+    return lines
 
 
 def residual_ignore(raw: Mapping[str, Any]) -> set[str]:
@@ -502,9 +563,13 @@ def _shipped_rules(root: str, version: str) -> bytes | None:
         return None
 
 
-def collect_raw(page: Any, root: str, site: str, with_runtime: bool) -> dict[str, Any]:
+def collect_raw(
+    page: Any, root: str, site: str, with_runtime: bool, only_host: str | None = None
+) -> dict[str, Any]:
     """Collects all data with real names. Must run inside
-    application_and_request_context() with the GUI page module loaded."""
+    application_and_request_context() with the GUI page module loaded.
+    only_host: restrict hosts and Setup rules to this host (the names of all
+    hosts are still used for the pseudonyms, but not included)."""
     import ast
     import socket
 
@@ -516,6 +581,7 @@ def collect_raw(page: Any, root: str, site: str, with_runtime: bool) -> dict[str
     meta: dict[str, Any] = {
         "generated_at": time.time(), "site": site, "root": root,
         "server": socket.gethostname(), "server_fqdn": socket.getfqdn(), "errors": errors,
+        "single_host": only_host is not None,
     }
     raw: dict[str, Any] = {"meta": meta}
 
@@ -559,7 +625,14 @@ def collect_raw(page: Any, root: str, site: str, with_runtime: bool) -> dict[str
     folders: set[str] = set()
     try:
         ruleset = page._load_mca_ruleset()
-        for folder, _index, rule in ([] if ruleset is None else ruleset.get_rules()):
+        rules = [] if ruleset is None else ruleset.get_rules()
+        if only_host is not None and rules:
+            _value, matching = ruleset.analyse_ruleset(
+                only_host, None, page.PIGGYBACK_SERVICE_TITLE, {}, debug=False
+            )
+            ids = {r.id for _f, _i, r in matching}
+            rules = [(f, i, r) for f, i, r in rules if r.id in ids]
+        for folder, _index, rule in rules:
             path = folder.path()
             folders.update(p for p in path.split("/") if p)
             spec = rule.to_config()
@@ -608,6 +681,8 @@ def collect_raw(page: Any, root: str, site: str, with_runtime: bool) -> dict[str
         loaded = None
         err("cache")
     results = list(loaded[1]) if loaded else []
+    if only_host is not None:
+        results = [r for r in results if r.host_name == only_host]
     effective: dict[str, Any] = {}
     try:
         for r in page._apply_rules(results, page._RuleLookup()):

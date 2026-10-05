@@ -174,5 +174,85 @@ class AnonymizeTest(unittest.TestCase):
         self.assertEqual(sd.residual_findings({"x": "on leaked-host"}, ["leaked-host"]), ["known name: leaked-host"])
 
 
+class SummaryTest(unittest.TestCase):
+    def test_resolve_matches_the_document(self) -> None:
+        doc, _mapping = sd.anonymize(raw_fixture(), KEY, False)
+        pseudonym = next(iter(doc["hosts"]))
+        all_hosts = raw_fixture()["all_host_names"]
+        self.assertEqual(sd.resolve_hosts(KEY, all_hosts, [pseudonym.upper()]),
+                         {pseudonym: ["db01.corp.example"]})
+        self.assertEqual(sd.resolve_hosts(KEY, all_hosts, ["host-00000000"]), {"host-00000000": []})
+        everything = sd.resolve_hosts(KEY, all_hosts, [])
+        self.assertEqual(sorted(n for names in everything.values() for n in names), sorted(all_hosts))
+        self.assertTrue(all(p.startswith("host-") for p in everything))
+        # The site's own server, monitored as a host too, is a "server-..."
+        raw = raw_fixture()
+        raw["all_host_names"].append("monitor-host.corp.example")
+        raw["hosts"]["monitor-host.corp.example"] = raw["hosts"]["db01.corp.example"]
+        server_pseudonym = [h for h in sd.anonymize(raw, KEY, False)[0]["hosts"] if h.startswith("server-")]
+        self.assertEqual(len(server_pseudonym), 1)
+        self.assertEqual(sd.resolve_hosts(KEY, raw["all_host_names"], server_pseudonym),
+                         {server_pseudonym[0]: ["monitor-host.corp.example"]})
+        self.assertTrue(sd.is_host_pseudonym("host-1a2b3c4d"))
+        self.assertTrue(sd.is_host_pseudonym("server-1a2b3c4d"))
+        self.assertFalse(sd.is_host_pseudonym("folder-1a2b3c4d"))
+
+    def test_summary_lists_content_and_residuals(self) -> None:
+        doc, _mapping = sd.anonymize(raw_fixture(), KEY, False)
+        text = "\n".join(sd.summary(doc, ["known name: db01"]))
+        self.assertIn("Hosts:            1 (pseudonymized, e.g. host-", text)
+        self.assertIn("of 2 on the site", text)
+        self.assertIn("mssql_instance", text)
+        self.assertIn("Service/process names: not included", text)
+        self.assertIn("checksum only (unmodified)", text)
+        self.assertIn("  - known name: db01", text)
+        self.assertNotIn("db01.corp.example", text)
+
+    def test_single_host_is_marked(self) -> None:
+        raw = raw_fixture()
+        raw["meta"]["single_host"] = True
+        doc, _mapping = sd.anonymize(raw, KEY, False)
+        self.assertTrue(doc["meta"]["single_host"])
+        self.assertIn("- single host", "\n".join(sd.summary(doc)))
+
+
+try:
+    import cryptography  # noqa: F401  (shipped with Checkmk, optional here)
+
+    HAVE_CRYPTO = True
+except ImportError:
+    HAVE_CRYPTO = False
+
+
+@unittest.skipUnless(HAVE_CRYPTO, "Python package 'cryptography' not available")
+class TransportTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.t = load_lib_module("transport")
+        cls.private, cls.public = cls.t.generate_keypair()
+
+    def test_roundtrip_and_not_readable(self) -> None:
+        doc, _mapping = sd.anonymize(raw_fixture(), KEY, False)
+        blob = self.t.encrypt(doc, self.public)
+        self.assertTrue(blob.startswith(self.t.MAGIC))
+        self.assertNotIn(b"mssql_instance", blob)
+        self.assertEqual(self.t.decrypt(blob, self.private), json.loads(json.dumps(doc, sort_keys=True)))
+
+    def test_wrong_key_and_tampering_fail(self) -> None:
+        blob = self.t.encrypt({"a": 1}, self.public)
+        other_private, _other_public = self.t.generate_keypair()
+        with self.assertRaises(self.t.TransportError):
+            self.t.decrypt(blob, other_private)
+        broken = blob[:-1] + bytes([blob[-1] ^ 1])
+        with self.assertRaises(self.t.TransportError):
+            self.t.decrypt(broken, self.private)
+        with self.assertRaises(self.t.TransportError):
+            self.t.decrypt(b"something else", self.private)
+
+    def test_key_kinds_are_not_mixed_up(self) -> None:
+        with self.assertRaises(self.t.TransportError):
+            self.t.encrypt({"a": 1}, self.private)
+
+
 if __name__ == "__main__":
     unittest.main()
