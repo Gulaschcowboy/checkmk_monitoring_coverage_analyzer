@@ -1,56 +1,52 @@
 # Analyze monitoring coverage
 
-Monitoring Coverage Analyzer (MCA): Checkmk extension (MKP) that finds applications and subsystems on
-agent-monitored hosts that are running but not yet monitored, and tells you
-which plug-in or special agent would cover them.
+Monitoring Coverage Analyzer (MCA): Checkmk extension (MKP) that finds
+applications and subsystems on agent-monitored hosts that are running but
+not yet monitored, and tells you which plug-in or special agent would
+cover them.
 
-Requires Checkmk 2.5.0p15 or later (uses `get-agent-output ... @cached`,
-so no additional agent queries are made).
+MCA works entirely with data Checkmk already has. Nothing needs to be
+deployed to your hosts.
+
+Requires Checkmk 2.5.0p15 or later.
 
 ## Components
 
-"MCA" is the short name used throughout: command line tool `mcactl`,
-Setup rule and global settings. Searching for "MCA" in the Setup search
-finds the GUI page, the Setup rule and the global settings.
-
 - **GUI page** "Setup > Maintenance > Analyze monitoring coverage":
-  overall coverage across all hosts, duration of the last analysis run,
-  and a table with coverage per host, findings, already monitored
-  subsystems and evidence sources. "Re-run analysis" starts the analysis
-  in the background (outside the web server, so large sites do not hit the
-  Apache timeout); the page reloads until it has finished. The run's log
-  is written to `var/log/monitoring_coverage_analyzer.log`.
+  Shows overall coverage across all hosts and a table with coverage, open
+  findings and already monitored subsystems per host. "Re-run analysis"
+  starts a fresh analysis run in the background. The run's log is written
+  to `var/log/monitoring_coverage_analyzer.log`.
   Cluster hosts are not analyzed (they have no agent output of their
   own); their clustered services count as monitored on the nodes.
 - **Piggyback service** "Checkmk Monitoring Coverage" per host
   (check plug-in `checkmk_monitoring_coverage`), fed from the cached
-  analysis result.
+  analysis result. Can be disabled in the global settings.
 - **Command line tool** `mcactl` (run as the site user):
-  - `setup`: installs or updates the cron jobs. MKPs cannot register cron
-    jobs themselves, so run it once after installing or updating.
+  - `setup`: installs or updates the cron jobs (MKPs cannot register cron
+    jobs themselves). Run it once after installing; updates only need it
+    again if the changelog says so.
   - `status`: shows the cron jobs and the time of the last runs.
   - `uninstall`: removes the cron jobs.
-  - `refresh` (cron, every 5 minutes): re-sends the last result as
-    piggyback data.
-  - `fullrun` (cron, daily at 05:00): re-runs the analysis if the
+  - `refresh` (only for cron): re-sends the last result as
+    piggyback data to avoid piggyback staleness.
+  - `fullrun` (only for cron, daily at 05:00): re-runs the analysis if the
     configured interval (Global setting, default 24 h) has elapsed.
-  - `rerun`: runs the analysis right away (also used by "Re-run
-    analysis").
+  - `rerun`: runs the analysis right away (also used by the "Re-run
+    analysis" button in the GUI).
   - `support-data`: collects anonymized data for a bug report (see
     "Support data").
-  - `refresh`, `status` and the `fullrun` due check do not load the
-    Checkmk GUI and take well under a second; only an actual analysis run
-    does.
-- **Rules file** `monitoring_coverage_analyzer_rules.json`: aliases,
-  titles, hints and detection rules. Can be adjusted without code changes.
 - **Setup rule** "Monitoring coverage analysis (MCA)" (Setup > Services >
   Service monitoring rules): ignore findings (false positives or accepted
-  gaps) by regular expressions on subsystem, check plug-in and evidence,
-  and disable the fuzzy search for potential check candidates (or show its
-  results as info only) for single or all hosts. By default, fuzzy
-  candidates are treated like other findings (WARN); the choice 'Enable'
-  re-enables them where a more general rule disables them. Applies to
-  the service and the GUI page alike, right after activating changes.
+  gaps) by regular expressions on subsystem, check plug-in and evidence.
+  You can also disable the fuzzy search for potential check candidates
+  (or show its results as info only) for single or all hosts. By default,
+  fuzzy candidates are treated like other findings (WARN); the choice
+  'Enable' re-enables them where a more general rule disables them.
+  Applies to the piggyback service and the GUI page alike, right after
+  activating changes.
+- **Rules file** `monitoring_coverage_analyzer_rules.json`: internal
+  detection logic (aliases, titles, hints and detection rules).
 
 ## Evidence sources
 
@@ -60,14 +56,14 @@ finds the GUI page, the Setup rule and the global settings.
    and `agent_builtin_families`.
 2. Host labels (except the operating system labels `cmk/os_*` and
    `cmk/site`; for built-in labels only the part after `cmk/` counts).
-3. Agent sections with real data (placeholder content does not count).
+3. Agent sections with real data.
 4. Deployed agent plug-ins (`checkmk_agent_plugins_*` sections).
 5. Runtime evidence via `detect` rules: running systemd units, processes
    and Windows services.
 6. Installed inventory packages: informational only, no effect on status,
    except for `detect` rules with a `package:` condition (tools without a
-   running service, e.g. apt). These also count without current agent data.
-7. Generic match: the leading name part of running systemd units,
+   running service, e.g. apt).
+7. Generic match/fuzzy search: the leading name part of running systemd units,
    processes and Windows services is matched against the families of all
    agent-based check plug-ins of the site, including installed MKPs. This
    finds subsystems without a curated rule. Built-in filters: SNMP-only
@@ -126,8 +122,8 @@ the permission to other roles under Setup > Users > Roles & permissions.
 
 Install and run the setup on the central site only. The central site
 analyzes the hosts of all sites; the agent output of hosts on a remote
-site is fetched from that site via remote automation
-(`get-agent-output ... @cached`, remote site must run 2.5.0p15 or later).
+site is fetched from that site via remote automation; remote sites must
+run 2.5.0p15 or later.
 The service data reaches the remote sites through the piggyback hub,
 which must be enabled on the central and the remote sites. The remote
 sites only need the package itself (e.g. via "Replicate extensions").
@@ -184,19 +180,3 @@ local/share/check_mk/web/plugins/config/     config defaults
 local/share/doc/monitoring_coverage_analyzer cron template
 tests/                                       unit tests (not packaged)
 ```
-
-## Tests
-
-The tests cover the rules file, the detection of every curated rule on
-synthetic hosts and the evaluation with the Setup rule. A new rule in the
-rules file needs a test case in `tests/test_rule_coverage.py`, otherwise
-the tests fail. They need neither
-a Checkmk installation nor additional packages:
-
-```
-python3 -m unittest discover -s tests
-```
-
-## Status
-
-Beta (0.9.0-bN). Not yet released.
