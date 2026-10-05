@@ -40,6 +40,7 @@ CASES: dict[str, tuple[str, dict[str, str]]] = {
     "postgres": (systemd_units("postgresql@16-main.service"), LINUX),
     "apache": (systemd_units("apache2.service"), LINUX),
     "nginx": (systemd_units("nginx.service"), LINUX),
+    "sshd": (systemd_units("ssh.service"), LINUX),
     "redis": (systemd_units("redis-server.service"), LINUX),
     "mongodb": (systemd_units("mongod.service"), LINUX),
     "docker": (systemd_units("docker.service"), LINUX),
@@ -86,7 +87,7 @@ MONITORED_ELSEWHERE = {"entra_connect"}
 
 # Rules that must not fire on Windows (rules file: "not_on_os": ["windows"]).
 # Fixed here on purpose, so that a dropped "not_on_os" is noticed.
-NOT_ON_WINDOWS = {"smart", "sap_hana", "saprouter", "oracle_crs", "openvpn", "ibm_mq"}
+NOT_ON_WINDOWS = {"smart", "sap_hana", "saprouter", "oracle_crs", "openvpn", "ibm_mq", "sshd"}
 
 
 class RuleCoverageTest(unittest.TestCase):
@@ -128,8 +129,13 @@ class RuleCoverageTest(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertEqual(kinds(analyze(output, labels=labels), token), [])
 
+    def test_sshd_config_check_counts_as_monitored(self) -> None:
+        # The real check plug-in name differs from the token.
+        items = analyze(systemd_units("ssh.service"), labels=LINUX, checks=["sshd_config"])
+        self.assertEqual(kinds(items, "sshd"), ["monitored"])
+
     def test_unrelated_host_has_no_curated_finding(self) -> None:
-        output = systemd_units("sshd.service", "cron.service") + processes("bash")
+        output = systemd_units("cron.service", "dbus.service") + processes("bash")
         items = analyze(output, labels=LINUX)
         self.assertEqual([i["token"] for i in items if i["token"] in self.detect], [])
 

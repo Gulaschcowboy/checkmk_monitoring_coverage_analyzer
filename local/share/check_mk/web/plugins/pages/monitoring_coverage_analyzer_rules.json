@@ -4,6 +4,7 @@
     "postgresql": "postgres", "postgres": "postgres", "postmaster": "postgres",
     "httpd": "apache", "apache2": "apache", "apache": "apache",
     "nginx": "nginx",
+    "sshd": "sshd", "sshd_config": "sshd", "mk_sshd_config": "sshd",
     "redis": "redis",
     "mongod": "mongodb", "mongodb": "mongodb",
     "dockerd": "docker", "containerd": "docker", "docker": "docker",
@@ -85,7 +86,7 @@
   },
   "titles": {
     "mysql": "MySQL / MariaDB", "postgres": "PostgreSQL",
-    "apache": "Apache HTTP Server", "nginx": "NGINX", "redis": "Redis",
+    "apache": "Apache HTTP Server", "nginx": "NGINX", "sshd": "OpenSSH Server", "redis": "Redis",
     "mongodb": "MongoDB", "docker": "Docker", "rabbitmq": "RabbitMQ",
     "elasticsearch": "Elasticsearch", "graylog": "Graylog", "haproxy": "HAProxy",
     "nfsexports": "NFS Server", "jolokia": "Java / Tomcat (Jolokia)",
@@ -133,6 +134,7 @@
     "postgres": "Deploy the 'mk_postgres' agent plug-in, then run discovery.",
     "apache": "Enable mod_status and deploy the 'apache_status.py' agent plug-in, then run discovery.",
     "nginx": "Enable stub_status and deploy the 'nginx_status.py' agent plug-in, then run discovery.",
+    "sshd": "Deploy the 'mk_sshd_config' agent plug-in (e.g. via the Agent Bakery), then run discovery.",
     "redis": "Deploy the 'mk_redis' agent plug-in, then run discovery.",
     "mongodb": "Deploy the 'mk_mongodb' agent plug-in, then run discovery.",
     "docker": "Deploy the 'mk_docker' agent plug-in, then run discovery.",
@@ -189,7 +191,7 @@
   "stop_tokens": [
     "cpu", "mem", "memory", "df", "tcp", "udp", "uptime", "kernel", "mounts",
     "mount", "systemd", "diskstat", "lnx", "ps", "mkeventd", "check", "cmk",
-    "livestatus", "omd", "chrony", "ntp", "cron", "ssh", "sshd", "users",
+    "livestatus", "omd", "chrony", "ntp", "cron", "users",
     "threads", "vmstat", "swap", "fileinfo", "logwatch", "md", "multipath",
     "tcpconn", "netif", "if", "interfaces", "hr", "snmp", "intel", "watchdog",
     "iptables", "mtr", "site", "monitoring_coverage_self"
@@ -216,6 +218,10 @@
     },
     "nginx": {
       "runtime": ["systemd:^nginx\\.service$"]
+    },
+    "sshd": {
+      "runtime": ["systemd:^sshd?\\.service$", "process:^sshd$"],
+      "not_on_os": ["windows"]
     },
     "redis": {
       "runtime": ["systemd:^redis(-server)?(@\\S+)?\\.service$"]
