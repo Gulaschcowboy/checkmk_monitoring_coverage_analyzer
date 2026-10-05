@@ -8,6 +8,14 @@ cover them.
 MCA works entirely with data Checkmk already has. Nothing needs to be
 deployed to your hosts.
 
+MCA works with heuristics: it infers from running services, processes,
+agent sections and plug-in names what could be monitored. This is
+deliberately kept somewhat fuzzy, so that it also finds software without
+a curated rule. By design, false positives (a finding that does not
+apply) and false negatives (something not found) cannot be ruled out
+completely. Please report them (see "Reporting false positives and
+negatives"); accepted gaps can be ignored with the Setup rule.
+
 Requires Checkmk 2.5.0p15 or later.
 
 ## Components
@@ -103,6 +111,10 @@ agent plug-in delivers piggyback data and the VMs are monitored.
 
 ## Installation
 
+Download the MKP from the
+[releases page](https://github.com/Gulaschcowboy/checkmk_monitoring_coverage_analyzer/releases) and install it as the
+site user:
+
 ```
 mkp add monitoring_coverage_analyzer-<version>.mkp
 mkp enable monitoring_coverage_analyzer <version>
@@ -135,6 +147,18 @@ disabled, no piggyback data is written, and data written earlier by this
 package is removed on the central site by the next refresh tick or
 analysis run. Copies already distributed to remote sites expire there
 with the maximum piggyback age and are then removed by Checkmk.
+
+## Reporting false positives and negatives
+
+Please open an [issue](https://github.com/Gulaschcowboy/checkmk_monitoring_coverage_analyzer/issues) for:
+
+- a finding that does not apply (false positive), or
+- running software that MCA does not find (false negative).
+
+Describe the host's software (e.g. "Debian 12 with PostgreSQL 16 from
+the distribution packages") and what MCA shows or misses. If you can,
+attach the encrypted support file (see "Support data"), never the
+unencrypted data.
 
 ## Support data
 
