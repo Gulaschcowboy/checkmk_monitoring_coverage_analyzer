@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """WATO menu integration: Setup > Maintenance > "Analyze monitoring coverage".
 
 Legacy WATO plugin (share/check_mk/web/plugins/wato/), imported by

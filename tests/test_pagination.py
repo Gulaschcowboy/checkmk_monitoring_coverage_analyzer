@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """Pagination and search filter of the host table on the GUI page."""
 
 from __future__ import annotations

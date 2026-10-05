@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """Encrypted transport file for support data ("mcactl support-data").
 
 The document is encrypted for the maintainer's public key, so the file can be

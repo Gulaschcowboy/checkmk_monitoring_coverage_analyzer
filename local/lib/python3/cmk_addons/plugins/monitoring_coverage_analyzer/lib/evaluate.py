@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """Shared evaluation of a host's raw coverage data.
 
 Used by the GUI page "Analyze monitoring coverage" AND by the check plugin

@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """Every curated rule of the rules file has a test case.
 
 CASES holds, per detect token, synthetic agent output (and host labels)

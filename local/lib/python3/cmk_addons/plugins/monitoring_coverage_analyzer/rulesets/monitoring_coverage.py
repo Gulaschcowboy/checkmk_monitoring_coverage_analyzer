@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """Setup rule for the "Checkmk Monitoring Coverage" service.
 
 Used by the check plug-in AND by the GUI page "Analyze monitoring coverage"

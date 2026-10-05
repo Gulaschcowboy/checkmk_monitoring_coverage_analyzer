@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """Support data for bug reports ("mcactl support-data").
 
 collect_raw() gathers the data in the GUI context (real names), anonymize()

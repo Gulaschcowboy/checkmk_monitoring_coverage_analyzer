@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """Maintainer tool for MCA support data transport files (not packaged).
 
     mca_support_tool.py decrypt FILE.json.enc [OUTPUT.json]

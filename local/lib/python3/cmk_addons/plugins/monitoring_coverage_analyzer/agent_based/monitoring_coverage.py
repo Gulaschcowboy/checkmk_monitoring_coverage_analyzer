@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 # Checkmk Monitoring Coverage - Agent-based Check-Plugin (Check API v2)
 #
 # Expansion stage 2.0.0 of the GUI page "monitoring_coverage_analyzer":

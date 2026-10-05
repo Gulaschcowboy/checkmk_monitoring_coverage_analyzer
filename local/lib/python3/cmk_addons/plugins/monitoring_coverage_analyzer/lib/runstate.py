@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """Run state of monitoring_coverage_analyzer WITHOUT the Checkmk GUI.
 
 Everything mcactl needs for the frequent, fast paths

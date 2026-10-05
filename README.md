@@ -192,3 +192,9 @@ local/share/doc/monitoring_coverage_analyzer cron template
 tests/                                       unit tests (not packaged)
 tools/                                       maintainer tools (not packaged)
 ```
+
+## License
+
+Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+
+GNU General Public License v2 only (GPL-2.0-only), see `LICENSE`.

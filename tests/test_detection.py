@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """Detection of curated subsystems on synthetic hosts.
 
 Each case states which finding is expected for a given set of running

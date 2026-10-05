@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 # Default values for the two global options from
 # plugins/wato/monitoring_coverage_analyzer_globals.py.
 #

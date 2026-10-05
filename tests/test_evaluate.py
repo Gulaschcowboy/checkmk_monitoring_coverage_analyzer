@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """Evaluation of host items with the Setup rule (lib/evaluate.py)."""
 
 from __future__ import annotations

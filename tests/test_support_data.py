@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Alexander Wilms, Christian Wirtz
+# SPDX-License-Identifier: GPL-2.0-only
 """Anonymization of the support data (lib/support_data.py)."""
 
 from __future__ import annotations
