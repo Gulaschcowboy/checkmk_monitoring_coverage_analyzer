@@ -229,6 +229,59 @@ def evaluate(items: Sequence[Mapping[str, Any]], params: Mapping[str, Any] | Non
     )
 
 
+# Source lines of the analysis (kept in the cache and in support data). Only
+# two of them are shown to the user, all others are diagnostics.
+_NO_AGENT_DATA_PREFIX = "Agent sections: unavailable via "
+_PACKAGES_ONLY_PREFIX = "Installed packages without runtime evidence (info only): "
+# "<source> (<error>)", source e.g. "get-agent-output @cached" or
+# "remote get-agent-output @cached (site <id>)"
+_NO_AGENT_DATA_RE = re.compile(r"^(?:remote )?get-agent-output @cached(?: \(site [^)]*\))? \((.*)\)$")
+
+
+def no_agent_data_reason(source_lines: Sequence[str]) -> str | None:
+    """Error text if no agent data was available for the host, else None."""
+    for line in source_lines:
+        if line.startswith(_NO_AGENT_DATA_PREFIX):
+            rest = line[len(_NO_AGENT_DATA_PREFIX):]
+            match = _NO_AGENT_DATA_RE.match(rest)
+            return match.group(1) if match else rest
+    return None
+
+
+def findings_text(evaluation: Evaluation, source_lines: Sequence[str]) -> str:
+    """Findings incl. a reference to missing agent data (the status stays
+    as evaluated: a host without agent data is not a coverage problem)."""
+    if no_agent_data_reason(source_lines) is None:
+        return evaluation.findings
+    if evaluation.status == "OK":
+        return "No open findings, but currently no agent data available. See details."
+    return f"{evaluation.findings} | No agent data available. See details."
+
+
+def visible_source_lines(source_lines: Sequence[str]) -> tuple[list[str], list[str]]:
+    """(notes, ignored) for display: missing agent data as a note (the result
+    of the host is incomplete), installed packages without a running service
+    as ignored lines (one per subsystem)."""
+    notes: list[str] = []
+    ignored: list[str] = []
+    reason = no_agent_data_reason(source_lines)
+    if reason is not None:
+        notes.append(f"No agent data available, the result of this host is incomplete. ({reason})")
+    for line in source_lines:
+        if line.startswith(_PACKAGES_ONLY_PREFIX):
+            for entry in line[len(_PACKAGES_ONLY_PREFIX):].split("; "):
+                title, sep, packages = entry.rpartition(" (")
+                if not sep:
+                    title, packages = entry, ""
+                packages = packages.rstrip(")")
+                ignored.append(
+                    f"{title}: package installed ({packages}), not running – not counted"
+                    if packages
+                    else f"{title}: package installed, not running – not counted"
+                )
+    return notes, ignored
+
+
 def detail_sections(
     evaluation: Evaluation, source_lines: Sequence[str], mode: str = GENERIC_WARN
 ) -> list[tuple[str, list[str]]]:
@@ -238,14 +291,15 @@ def detail_sections(
         if mode == GENERIC_WARN
         else "Candidates (generic match, info only):"
     )
+    notes, packages_only = visible_source_lines(source_lines)
     return [
         (heading, list(lines))
         for heading, lines in (
+            ("Note:", notes),
             ("Unmonitored:", evaluation.unmonitored_lines),
             (candidate_heading, evaluation.candidate_lines),
-            ("Ignored:", evaluation.ignored_lines),
+            ("Ignored:", [*evaluation.ignored_lines, *packages_only]),
             ("Already monitored:", evaluation.monitored_lines),
-            ("Sources:", source_lines),
         )
         if lines
     ]

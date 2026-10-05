@@ -433,27 +433,6 @@ def _reload_rules() -> None:
     NO_DATA_LINES[:] = rules.no_data_lines
 
 
-def _rules_source_status() -> str:
-    """Human-readable provenance info about the currently loaded
-    findings/hint rules - directly answers the question "where does
-    this result come from": modification time of the JSON file, and the
-    number of loaded entries per table. There is no code fallback
-    source anymore (see module docstring), hence always the same file.
-    """
-    path = _rules_path()
-    try:
-        mtime = os.path.getmtime(path)
-        mtime_txt = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
-    except OSError:
-        mtime_txt = "?"
-    return (
-        f"{mtime_txt}; "
-        f"{len(ALIASES)} aliases, {len(TITLES)} titles, "
-        f"{len(HINTS)} hints, {len(STOP_TOKENS)} stop-tokens, "
-        f"{len(DETECT)} detect rules loaded"
-    )
-
-
 try:
     _reload_rules()
 except RulesLoadError:
@@ -1507,14 +1486,15 @@ def _detail_sections_for(result: _HostResult, lookup: Any) -> list[tuple[str, li
         if mode == _ev.GENERIC_WARN
         else _("Candidates (generic match, info only):")
     )
+    notes, packages_only = _ev.visible_source_lines(result.source_lines)
     return [
         (heading, list(lines))
         for heading, lines in (
+            (_("Note:"), notes),
             (_("Unmonitored:"), result.unmonitored_lines),
             (candidate_heading, result.candidate_lines),
-            (_("Ignored:"), result.ignored_lines),
+            (_("Ignored:"), [*result.ignored_lines, *packages_only]),
             (_("Already monitored:"), result.monitored_lines),
-            (_("Sources:"), result.source_lines),
         )
         if lines
     ]
@@ -1965,7 +1945,7 @@ def _build_result(
         status=evaluation.status,
         coverage_pct=evaluation.coverage_pct,
         fraction_text=evaluation.fraction_text,
-        findings=evaluation.findings,
+        findings=_ev.findings_text(evaluation, source_lines),
         detail_lines=_ev.detail_lines(evaluation, source_lines, mode),
         capability_summary=capability_summary,
         unmonitored_lines=evaluation.unmonitored_lines,
@@ -2975,7 +2955,6 @@ class PageMonitoringCoverageAnalyzer(Page):
             _("Last run: %s, took %s")
             % (age_txt, _format_duration(_cached_run_duration()))
         )
-        html.p(_("Rule file last modified: %s") % _rules_source_status())
         rules_url = makeuri_contextless(
             request,
             [("mode", "edit_ruleset"), ("varname", "checkgroup_parameters:checkmk_monitoring_coverage")],

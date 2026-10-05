@@ -64,5 +64,49 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual((off.status, off.candidate_lines, off.ignored_lines), ("OK", [], []))
 
 
+SOURCES = [
+    "Evidence per subsystem: check_command:5, agent_section:4",
+    "Installed packages without runtime evidence (info only): MySQL / MariaDB (mysql-common); "
+    "PostgreSQL (postgresql-client-16, postgresql-common)",
+    "Inventory packages: 608 (HW/SW inventory, info only)",
+    "Agent sections: 36 via get-agent-output @cached",
+]
+NO_AGENT = ["Agent sections: unavailable via get-agent-output @cached (no cached agent output)"]
+NO_AGENT_REMOTE = ["Agent sections: unavailable via remote get-agent-output @cached (site remote1) "
+                   "(Failed to fetch data from host1: Error('[Errno 113] No route to host'))"]
+
+
+class DetailSectionsTest(unittest.TestCase):
+    def test_no_sources_section(self) -> None:
+        headings = [h for h, _l in ev.detail_sections(ev.evaluate([OPEN, MONITORED], None), SOURCES)]
+        self.assertEqual(headings, ["Unmonitored:", "Ignored:", "Already monitored:"])
+        text = "\n".join(ev.detail_lines(ev.evaluate([MONITORED], None), SOURCES))
+        for hidden in ("Evidence per subsystem", "Inventory packages", "Agent sections: 36", "Sources:"):
+            self.assertNotIn(hidden, text)
+
+    def test_packages_without_runtime_are_ignored_lines(self) -> None:
+        sections = dict(ev.detail_sections(ev.evaluate([MONITORED], None), SOURCES))
+        self.assertEqual(sections["Ignored:"], [
+            "MySQL / MariaDB: package installed (mysql-common), not running – not counted",
+            "PostgreSQL: package installed (postgresql-client-16, postgresql-common), not running – not counted",
+        ])
+
+    def test_missing_agent_data_stays_visible(self) -> None:
+        sections = ev.detail_sections(ev.evaluate([], None), NO_AGENT)
+        self.assertEqual(sections[0][0], "Note:")
+        self.assertEqual(sections[0][1], ["No agent data available, the result of this host is incomplete. "
+                                          "(no cached agent output)"])
+        remote = ev.detail_sections(ev.evaluate([], None), NO_AGENT_REMOTE)
+        self.assertEqual(remote[0][1], ["No agent data available, the result of this host is incomplete. "
+                                        "(Failed to fetch data from host1: Error('[Errno 113] No route to host'))"])
+
+    def test_missing_agent_data_in_findings(self) -> None:
+        self.assertEqual(ev.findings_text(ev.evaluate([MONITORED], None), NO_AGENT),
+                         "No open findings, but currently no agent data available. See details.")
+        warn = ev.evaluate([OPEN], None)
+        self.assertEqual(ev.findings_text(warn, NO_AGENT), warn.findings + " | No agent data available. See details.")
+        self.assertEqual(ev.findings_text(warn, SOURCES), warn.findings)
+
+
 if __name__ == "__main__":
     unittest.main()

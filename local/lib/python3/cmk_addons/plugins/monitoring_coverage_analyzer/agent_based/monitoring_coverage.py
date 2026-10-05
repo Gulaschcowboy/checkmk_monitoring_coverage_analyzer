@@ -97,12 +97,10 @@ def check_monitoring_coverage(params: Mapping[str, Any], section: Mapping[str, A
         status = evaluation.status
         coverage_pct: Any = evaluation.coverage_pct
         fraction_text = evaluation.fraction_text
-        findings = evaluation.findings
-        detail_lines: Any = _ev.detail_lines(
-            evaluation,
-            [str(x) for x in section.get("source_lines") or []],
-            _ev.generic_mode(params),
-        )
+        source_lines = [str(x) for x in section.get("source_lines") or []]
+        findings = _ev.findings_text(evaluation, source_lines)
+        no_agent_data = _ev.no_agent_data_reason(source_lines) is not None
+        detail_lines: Any = _ev.detail_lines(evaluation, source_lines, _ev.generic_mode(params))
     else:
         # Section from an older analysis run (before b21): finished result,
         # rules only take effect after the next run.
@@ -111,12 +109,13 @@ def check_monitoring_coverage(params: Mapping[str, Any], section: Mapping[str, A
         fraction_text = str(section.get("fraction_text", ""))
         findings = str(section.get("findings", ""))
         detail_lines = section.get("detail_lines") or []
+        no_agent_data = False
 
     state_map = {"OK": State.OK, "WARN": State.WARN, "CRIT": State.CRIT}
     state = state_map.get(status, State.UNKNOWN)
 
     summary_parts = [fraction_text] if fraction_text else []
-    if findings and status != "OK":
+    if findings and (status != "OK" or no_agent_data):
         summary_parts.append(findings)
     summary = " | ".join(summary_parts) if summary_parts else f"status={status}"
 
