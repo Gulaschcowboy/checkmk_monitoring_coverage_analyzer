@@ -56,6 +56,14 @@ Requires Checkmk 2.5.0p15 or later.
 - **Rules file** `monitoring_coverage_analyzer_rules.json`: internal
   detection logic (aliases, titles, hints and detection rules).
 
+## Screenshots
+<img width="2125" height="1292" alt="MCA-Overview" src="https://github.com/user-attachments/assets/3dc96cff-82b9-4af2-8563-fa56435464ab" />
+
+<img width="2134" height="385" alt="MCA-Details2" src="https://github.com/user-attachments/assets/9108494f-dc73-44dd-8268-d0c7580f7e6b" />
+
+<img width="606" height="416" alt="MCA-ruleset" src="https://github.com/user-attachments/assets/c6df796e-cfad-4b66-8a1c-30d6b8f01a6c" />
+
+
 ## Evidence sources
 
 1. Services already monitored (Livestatus check commands). Running checks
