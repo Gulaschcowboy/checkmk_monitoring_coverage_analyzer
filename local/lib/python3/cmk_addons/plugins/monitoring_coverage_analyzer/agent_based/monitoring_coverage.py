@@ -24,7 +24,7 @@
 #     content + new message_timestamp).
 # Both lines ALWAYS appear together.
 #
-# 0.9.0-b21: status, coverage and texts are computed here from the unfiltered
+# Status, coverage and texts are computed here from the unfiltered
 # items of the section (lib/evaluate.py, shared with the GUI page) - so
 # ignore rules and the mode for generic candidates (Setup rule
 # "Monitoring coverage analysis") take effect right after
@@ -104,7 +104,7 @@ def check_monitoring_coverage(params: Mapping[str, Any], section: Mapping[str, A
         no_agent_data = _ev.no_agent_data_reason(source_lines) is not None
         detail_lines: Any = _ev.detail_lines(evaluation, source_lines, _ev.generic_mode(params))
     else:
-        # Section from an older analysis run (before b21): finished result,
+        # Section from an older analysis run (older version): finished result,
         # rules only take effect after the next run.
         status = str(section.get("status", "UNKNOWN"))
         coverage_pct = section.get("coverage_pct")
