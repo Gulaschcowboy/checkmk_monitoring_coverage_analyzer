@@ -18,6 +18,20 @@ negatives"); accepted gaps can be ignored with the Setup rule.
 
 Requires Checkmk 2.5.0p15 or later.
 
+## Table of contents
+
+- [Components](#components)
+- [Screenshots](#screenshots)
+- [Evidence sources](#evidence-sources)
+- [Installation](#installation)
+- [Permissions](#permissions)
+- [Distributed monitoring](#distributed-monitoring)
+- [Reporting false positives and negatives](#reporting-false-positives-and-negatives)
+- [Support data](#support-data)
+- [Repository layout](#repository-layout)
+- [Development](#development)
+- [License](#license)
+
 ## Components
 
 - **GUI page** "Setup > Maintenance > Analyze monitoring coverage":
