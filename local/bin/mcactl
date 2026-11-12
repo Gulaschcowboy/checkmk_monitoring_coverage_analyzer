@@ -210,17 +210,30 @@ def _app_context():
     return application_and_request_context
 
 
+def _register_main_modules() -> None:
+    """main_modules.register() for 2.5 and 3.0: 3.0 added a required
+    keyword-only "debug" argument that 2.5 does not know."""
+    import inspect
+
+    from cmk.ccc.version import edition
+    from cmk.gui import main_modules
+    from cmk.utils import paths as cmk_paths
+
+    if "debug" in inspect.signature(main_modules.register).parameters:
+        main_modules.register(edition(cmk_paths.omd_root), debug=False)
+    else:
+        main_modules.register(edition(cmk_paths.omd_root))
+
+
 def _run_analysis() -> tuple[int, int, str | None]:
     """Loads the GUI and the page module and runs a complete analysis
     (including saving the result and writing piggyback data)."""
     # main_modules.register() must run before application_and_request_context()
     # (otherwise KeyError in features_registry) - same call as in
     # cmk-update-config.
-    from cmk.ccc.version import edition
-    from cmk.gui import main_modules
     from cmk.utils import paths as cmk_paths
 
-    main_modules.register(edition(cmk_paths.omd_root))
+    _register_main_modules()
 
     application_and_request_context = _app_context()
 
@@ -518,11 +531,9 @@ def cmd_support_data(site: str, root: str, args: list[str]) -> int:
 
 def _load_page_module_in_context() -> dict:
     """GUI context factory and page module loader (see _run_analysis)."""
-    from cmk.ccc.version import edition
-    from cmk.gui import main_modules
     from cmk.utils import paths as cmk_paths
 
-    main_modules.register(edition(cmk_paths.omd_root))
+    _register_main_modules()
     application_and_request_context = _app_context()
 
     def load():

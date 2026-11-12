@@ -2373,6 +2373,22 @@ def _is_full_run_due(*, force: bool) -> tuple[bool, str]:
 _RULESET_NAME = "checkgroup_parameters:checkmk_monitoring_coverage"
 
 
+def _folder_tree() -> Any:
+    """Setup's folder tree. Newer Checkmk 3.0 builds create it from the GUI
+    config (make_folder_tree); 2.5 and earlier 3.0 builds have folder_tree()."""
+    try:
+        # Checkmk 3.0 (dailies from 2026-11)
+        from cmk.gui.watolib.hosts_and_folders import make_folder_tree
+    except ImportError:
+        # Checkmk 2.5
+        from cmk.gui.watolib.hosts_and_folders import folder_tree
+
+        return folder_tree()
+    from cmk.gui.config import active_config
+
+    return make_folder_tree(active_config)
+
+
 def _load_mca_ruleset() -> Any:
     """The Setup ruleset of the MCA service, loaded from all folders.
     Checkmk 3.0 expects the folder tree as first argument, 2.5 does not."""
@@ -2380,9 +2396,7 @@ def _load_mca_ruleset() -> Any:
 
     load = SingleRulesetRecursively.load_single_ruleset_recursively
     if "tree" in inspect.signature(load).parameters:
-        from cmk.gui.watolib.hosts_and_folders import folder_tree
-
-        return load(folder_tree(), _RULESET_NAME).get(_RULESET_NAME)
+        return load(_folder_tree(), _RULESET_NAME).get(_RULESET_NAME)
     return load(_RULESET_NAME).get(_RULESET_NAME)
 
 
@@ -2530,13 +2544,24 @@ def _show_search_form() -> None:
     html.write_html(HTML.without_escaping(
         '<form method="GET" action="monitoring_coverage_analyzer.py" style="margin:6px 0">'
     ))
-    html.text_input(
-        varname="search", default_value=_current_search(), size=40, id_="mca_search",
+    # Rendered by hand instead of html.text_input(): after filtering the field
+    # needs autofocus with the cursor at the end (onfocus), and text_input()
+    # offers neither. Checkmk 3.0 dropped html.javascript(), so no inline
+    # <script> block for this; size/style match text_input(size=40).
+    html.input(
+        "search", "text",
+        id_="mca_search",
+        class_="text",
+        size="41",
+        style="width: 40.8ex;",
+        value=_current_search(),
         placeholder=_("Filter hostname and findings"),
         title=_(
             "Case-insensitive. All words must match the hostname or the findings; "
             "regular expressions are allowed."
         ),
+        autofocus="" if request.has_var("search") else None,
+        onfocus="var n=this.value.length;this.setSelectionRange(n,n);",
         oninput=(
             "clearTimeout(window.mca_search_timer);"
             "var f=this.form;"
@@ -2565,12 +2590,6 @@ def _show_search_form() -> None:
     if _current_page_size() != _DEFAULT_PAGE_SIZE:
         html.hidden_field("limit", str(_current_page_size()))
     html.write_html(HTML.without_escaping("</form>"))
-    if request.has_var("search"):
-        # After filtering: focus back into the field, cursor at the end.
-        html.javascript(
-            "(function(){var i=document.getElementById('mca_search');"
-            "if(i){i.focus();var n=i.value.length;i.setSelectionRange(n,n);}})();"
-        )
 
 
 def _page_bounds(total: int, page: int, size: int) -> tuple[int, int, int, int]:
@@ -2911,7 +2930,9 @@ class PageMonitoringCoverageAnalyzer(Page):
             # Reload WITHOUT _analyze (otherwise a new run would be started),
             # sorting is preserved.
             url = makeuri_contextless(request, _sort_vars(), filename="monitoring_coverage_analyzer.py")
-            html.javascript(f"setTimeout(function(){{window.location.href={json.dumps(url)};}}, 5000);")
+            # Checkmk's own redirect helper (cmk.utils.set_reload): exists in
+            # 2.5 and 3.0; 3.0 dropped html.javascript().
+            html.immediate_browser_redirect(5, url)
         elif state == "failed":
             # An aborted process has no end time -> start time
             when_ts = status.get("finished") or status.get("started") or status.get("requested")
